@@ -1,0 +1,9 @@
+{
+  "name": "eaze-brand-intelligence",
+  "version": "1.0.0",
+  "description": "Eaze Brand Intelligence Platform demo",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "dependencies": { "express": "^4.18.2" },
+  "engines": { "node": ">=18" }
+}
