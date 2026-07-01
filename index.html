@@ -123,6 +123,89 @@ table.dt tr:hover td{background:var(--s2)}
 .rpxbtn:hover{background:var(--s3);color:var(--t1)}
 .backbtn{display:flex;align-items:center;gap:5px;background:transparent;border:none;color:var(--t2);cursor:pointer;font-size:12px}
 .backbtn:hover{color:var(--t1)}
+
+/* ── DESIGN TOKENS ─────────────────────────────────────────── */
+:root {
+  --yellow: #FFE400;
+  --yellow-dim: rgba(255,228,0,0.1);
+  --r-md: 8px;
+  --r-lg: 12px;
+}
+
+/* Dark (default — matches existing palette, aligned to token system) */
+html, html[data-theme="dark"] {
+  --bg:  #0D0D12;
+  --s1:  #141413;
+  --s2:  #1c1c1a;
+  --s3:  #24242F;
+  --bdr: rgba(255,255,255,.08);
+  --bdr2:rgba(255,255,255,.16);
+  --t1:  #f0f0ec;
+  --t2:  #909090;
+  --t3:  #525250;
+  --acc: #F5A800;
+  --green:#6fcf97;
+  --red:  #eb5757;
+  --blue: #6CB4F5;
+  --info-bg:rgba(255,228,0,.10);   --info-fg:#FFE400;
+  --warn-bg:rgba(245,166,35,.12);  --warn-fg:#f5a83a;
+  --succ-bg:rgba(111,207,151,.10); --succ-fg:#6fcf97;
+  --dang-bg:rgba(235,87,87,.12);   --dang-fg:#eb5757;
+}
+
+/* Light */
+html[data-theme="light"] {
+  --bg:  #ededea;
+  --s1:  #ffffff;
+  --s2:  #f5f5f3;
+  --s3:  #e8e8e5;
+  --bdr: rgba(0,0,0,.10);
+  --bdr2:rgba(0,0,0,.20);
+  --t1:  #1a1a18;
+  --t2:  #6b6b66;
+  --t3:  #9c9c96;
+  --acc: #a87500;
+  --green:#137333;
+  --red:  #c5221f;
+  --blue: #1a6bc5;
+  --info-bg:#e8f1fe;   --info-fg:#1a6bc5;
+  --warn-bg:#fef3e2;   --warn-fg:#a05c00;
+  --succ-bg:#e6f4ea;   --succ-fg:#137333;
+  --dang-bg:#fce8e6;   --dang-fg:#c5221f;
+}
+
+/* Light-mode badge overrides (bg_ = green, br_ = red, by_ = yellow, bb_ = blue) */
+html[data-theme="light"] .bg_{background:var(--succ-bg);color:var(--succ-fg)}
+html[data-theme="light"] .br_{background:var(--dang-bg);color:var(--dang-fg)}
+html[data-theme="light"] .by_{background:var(--warn-bg);color:var(--warn-fg)}
+html[data-theme="light"] .bb_{background:var(--info-bg);color:var(--info-fg)}
+html[data-theme="light"] .bvio_{background:#f3e8fd;color:#7627bb}
+html[data-theme="light"] .bgr_{background:var(--s3);color:var(--t2)}
+
+/* Light-mode sidebar active state */
+html[data-theme="light"] .tbtn.ac{background:rgba(168,117,0,.10);color:var(--acc)}
+html[data-theme="light"] .tbtn.ac::before{background:var(--acc)}
+
+/* Light-mode chart card / table */
+html[data-theme="light"] .chcard{background:var(--s1);border-color:var(--bdr)}
+html[data-theme="light"] .tc{background:var(--s1);border-color:var(--bdr)}
+html[data-theme="light"] table.dt th{background:var(--s2)}
+html[data-theme="light"] table.dt tr:hover td{background:var(--s2)}
+
+/* Smooth transition on theme change */
+html{transition:background .2s,color .2s}
+*, *::before, *::after{transition:background-color .2s,border-color .2s,color .15s}
+
+/* Theme toggle button */
+.theme-btn{
+  height:32px;padding:0 11px;border-radius:var(--r-md);
+  background:var(--s2);border:1px solid var(--bdr);
+  color:var(--t2);cursor:pointer;
+  display:flex;align-items:center;justify-content:center;gap:6px;
+  font-size:12.5px;font-weight:500;flex-shrink:0;white-space:nowrap;
+  transition:background .15s,color .15s;
+}
+.theme-btn:hover{background:var(--s3);color:var(--t1)}
 </style>
 </head>
 <body class="">
@@ -226,6 +309,7 @@ table.dt tr:hover td{background:var(--s2)}
     </div>
     <div style="margin-left:auto;display:flex;align-items:center;gap:10px">
       <select class="psel"><option>June 2026</option><option>May 2026</option><option>Q2 2026</option><option>YTD 2026</option></select>
+      <button class="theme-btn" id="themeBtn" onclick="toggleTheme()" title="Toggle light / dark mode" aria-label="Toggle colour theme"><i class="ti ti-sun" id="themeIcon" style="font-size:15px"></i><span id="themeLabel">Light</span></button>
       <button class="shbtn" onclick="showTab('share')"><i class="ti ti-share"></i> Share Report</button>
     </div>
   </header>
@@ -745,6 +829,37 @@ function drawRpChart() {
       { label:'Net', data:[37900,41200,39700,52080,42950,44700,48370], borderColor:'#F5A800', backgroundColor:'rgba(245,168,0,0.06)', borderWidth:2, borderDash:[4,3], pointBackgroundColor:'#F5A800', pointRadius:3, fill:true, tension:0.3 }
     ]
   );
+}
+
+// ── Theme toggle ──────────────────────────────────────────────
+(function(){
+  var saved = localStorage.getItem('eaz_theme') || 'dark';
+  document.documentElement.setAttribute('data-theme', saved);
+  // Update icon once DOM is ready
+  document.addEventListener('DOMContentLoaded', function(){
+    updateThemeIcon(saved);
+  });
+})();
+
+function toggleTheme() {
+  var current = document.documentElement.getAttribute('data-theme') || 'dark';
+  var next = current === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  localStorage.setItem('eaz_theme', next);
+  updateThemeIcon(next);
+}
+
+function updateThemeIcon(theme) {
+  var icon  = document.getElementById('themeIcon');
+  var label = document.getElementById('themeLabel');
+  if (!icon) return;
+  if (theme === 'dark') {
+    icon.className = 'ti ti-sun';
+    if (label) label.textContent = 'Light';
+  } else {
+    icon.className = 'ti ti-moon';
+    if (label) label.textContent = 'Dark';
+  }
 }
 </script>
 </body>
