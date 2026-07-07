@@ -8,7 +8,8 @@
 // Parameters passed per run: brand_id, start_date, end_date, channel
 // These must match the {{param}} syntax in your Mode SQL queries.
 
-const https = require('https');
+const https  = require('https');
+const zlib   = require('zlib');
 
 const MODE_BASE   = 'https://app.mode.com';
 const WORKSPACE   = process.env.MODE_WORKSPACE;   // confirmed: eazeup
@@ -27,16 +28,26 @@ function modeRequest(path, method = 'GET', body = null) {
     const options = {
       method,
       headers: {
-        Authorization:  `Basic ${auth}`,
-        Accept:         'application/json',
-        'Content-Type': 'application/json',
+        Authorization:   `Basic ${auth}`,
+        Accept:          'application/json',
+        'Accept-Encoding': 'gzip, deflate',
+        'Content-Type':  'application/json',
         ...(payload && { 'Content-Length': Buffer.byteLength(payload) }),
       },
     };
     const req = https.request(`${MODE_BASE}${path}`, options, (res) => {
+      const encoding = res.headers['content-encoding'];
+      let stream = res;
+
+      if (encoding === 'gzip') {
+        stream = res.pipe(zlib.createGunzip());
+      } else if (encoding === 'deflate') {
+        stream = res.pipe(zlib.createInflate());
+      }
+
       let data = '';
-      res.on('data', (chunk) => (data += chunk));
-      res.on('end', () => {
+      stream.on('data', chunk => (data += chunk));
+      stream.on('end', () => {
         try {
           const parsed = JSON.parse(data);
           if (res.statusCode >= 400) {
@@ -45,9 +56,10 @@ function modeRequest(path, method = 'GET', body = null) {
             resolve(parsed);
           }
         } catch {
-          reject(new Error(`Mode API non-JSON response (${res.statusCode}): ${data.slice(0, 200)}`));
+          reject(new Error(`Mode API non-JSON (${res.statusCode}): ${data.slice(0, 200)}`));
         }
       });
+      stream.on('error', reject);
     });
     req.on('error', reject);
     if (payload) req.write(payload);
