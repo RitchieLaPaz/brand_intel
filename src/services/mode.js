@@ -1,15 +1,6 @@
 // src/services/mode.js — Mode Analytics REST API client
-//
-// Mode report run lifecycle:
-//   POST /runs → run token (async, state: enqueued → running → succeeded/failed)
-//   GET  /runs/:token → poll state
-//   GET  /runs/:token/results/content.json → fetch rows
-//
-// Parameters passed per run: brand_id, start_date, end_date, channel
-// These must match the {{param}} syntax in your Mode SQL queries.
-
-const https  = require('https');
-const zlib   = require('zlib');
+const https = require('https');
+const zlib  = require('zlib');
 
 const MODE_BASE   = 'https://app.mode.com';
 const WORKSPACE   = process.env.MODE_WORKSPACE;   // confirmed: eazeup
@@ -17,10 +8,9 @@ const MODE_TOKEN  = process.env.MODE_API_TOKEN;
 const MODE_SECRET = process.env.MODE_API_SECRET;
 
 const POLL_INTERVAL_MS = 2_000;
-const POLL_TIMEOUT_MS  = 120_000; // 2 min max per run
+const POLL_TIMEOUT_MS  = 120_000;
 
-// ─── Low-level fetch wrapper ──────────────────────────────────
-
+// ─── HTTP wrapper with gzip decompression ────────────────────
 function modeRequest(path, method = 'GET', body = null) {
   return new Promise((resolve, reject) => {
     const auth    = Buffer.from(`${MODE_TOKEN}:${MODE_SECRET}`).toString('base64');
@@ -28,22 +18,18 @@ function modeRequest(path, method = 'GET', body = null) {
     const options = {
       method,
       headers: {
-        Authorization:   `Basic ${auth}`,
-        Accept:          'application/json',
-        'Accept-Encoding': 'gzip, deflate',
-        'Content-Type':  'application/json',
+        Authorization:    `Basic ${auth}`,
+        Accept:           'application/json',
+        'Accept-Encoding':'gzip, deflate',
+        'Content-Type':   'application/json',
         ...(payload && { 'Content-Length': Buffer.byteLength(payload) }),
       },
     };
     const req = https.request(`${MODE_BASE}${path}`, options, (res) => {
-      const encoding = res.headers['content-encoding'];
+      const enc = res.headers['content-encoding'];
       let stream = res;
-
-      if (encoding === 'gzip') {
-        stream = res.pipe(zlib.createGunzip());
-      } else if (encoding === 'deflate') {
-        stream = res.pipe(zlib.createInflate());
-      }
+      if (enc === 'gzip')    stream = res.pipe(zlib.createGunzip());
+      if (enc === 'deflate') stream = res.pipe(zlib.createInflate());
 
       let data = '';
       stream.on('data', chunk => (data += chunk));
@@ -51,12 +37,12 @@ function modeRequest(path, method = 'GET', body = null) {
         try {
           const parsed = JSON.parse(data);
           if (res.statusCode >= 400) {
-            reject(new Error(`Mode API ${res.statusCode}: ${parsed.message ?? data}`));
+            reject(new Error(`Mode API ${res.statusCode}: ${parsed.message ?? data.slice(0, 300)}`));
           } else {
             resolve(parsed);
           }
         } catch {
-          reject(new Error(`Mode API non-JSON (${res.statusCode}): ${data.slice(0, 200)}`));
+          reject(new Error(`Mode non-JSON (${res.statusCode}): ${data.slice(0, 300)}`));
         }
       });
       stream.on('error', reject);
@@ -68,70 +54,105 @@ function modeRequest(path, method = 'GET', body = null) {
 }
 
 // ─── Create a report run ──────────────────────────────────────
-// reportToken: Mode report token (stored in brands.mode_reports JSON)
-// params: { brand_id, start_date, end_date, channel }
-
 async function createRun(reportToken, params) {
   const path = `/api/${WORKSPACE}/reports/${reportToken}/runs`;
   const run  = await modeRequest(path, 'POST', { parameters: params });
-  // run._links.self.href contains the run URL
-  return run.token || run._links?.self?.href?.split('/').pop();
+  const token = run.token || run._links?.self?.href?.split('/').pop();
+  console.log(`[mode] created run ${token} for report ${reportToken}`);
+  return token;
 }
 
-// ─── Poll run until complete ──────────────────────────────────
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+// ─── Poll until run completes ─────────────────────────────────
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 async function waitForRun(reportToken, runToken) {
   const path    = `/api/${WORKSPACE}/reports/${reportToken}/runs/${runToken}`;
   const started = Date.now();
-
   while (Date.now() - started < POLL_TIMEOUT_MS) {
-    const run = await modeRequest(path);
+    const run   = await modeRequest(path);
     const state = run.state;
-
+    console.log(`[mode] run ${runToken} state: ${state}`);
     if (state === 'succeeded') return run;
     if (state === 'failed')    throw new Error(`Mode run failed: ${run.error_message ?? 'unknown'}`);
-    // states: enqueued | pending | running | succeeded | failed | cancelled
     await sleep(POLL_INTERVAL_MS);
   }
   throw new Error(`Mode run timed out after ${POLL_TIMEOUT_MS / 1000}s`);
 }
 
-// ─── Fetch run results ────────────────────────────────────────
-// Returns { columns: [...], rows: [{col: val, ...}, ...] }
+// ─── Parse content response (handles Mode's formats) ─────────
+function parseContent(content) {
+  let columns = [];
+  let rows    = [];
 
-async function getResults(reportToken, runToken) {
-  const path    = `/api/${WORKSPACE}/reports/${reportToken}/runs/${runToken}/results/content.json`;
-  const content = await modeRequest(path);
+  if (Array.isArray(content)) {
+    // Array of query results — take the first
+    const first = content[0] || {};
+    columns = first.columns || [];
+    rows    = first.rows    || [];
+  } else if (content?.columns) {
+    columns = content.columns;
+    rows    = content.rows || [];
+  } else if (content?.content) {
+    columns = content.content.columns || [];
+    rows    = content.content.rows    || [];
+  }
 
-  // Mode returns { columns: [{name, type}], rows: [[val, ...], ...] }
-  // Normalize to array of objects for easier downstream use
-  const { columns = [], rows = [] } = content;
-  const colNames = columns.map((c) => c.name);
-  const normalized = rows.map((row) =>
-    Object.fromEntries(colNames.map((name, i) => [name, row[i]]))
+  // columns can be strings or {name, ...} objects
+  const colNames = columns.map(c => (typeof c === 'object' ? (c.name || c.label || String(c)) : c));
+
+  // rows can be arrays [val, ...] or already objects {col: val}
+  const normalized = rows.map(row =>
+    Array.isArray(row)
+      ? Object.fromEntries(colNames.map((name, i) => [name, row[i]]))
+      : row
   );
-  return { columns: colNames, rows: normalized, rawCount: rows.length };
+
+  console.log(`[mode] parsed → ${colNames.length} columns, ${normalized.length} rows`);
+  return { columns: colNames, rows: normalized, rawCount: normalized.length };
 }
 
-// ─── Main: run a report end-to-end ───────────────────────────
-// reportToken: from brands.mode_reports[reportType]
-// params: { brand_id, start_date, end_date, channel }
+// ─── Fetch run results (tries query_runs first, then fallback) ─
+async function getResults(reportToken, runToken) {
+  const runPath = `/api/${WORKSPACE}/reports/${reportToken}/runs/${runToken}`;
 
+  // Step 1: get run details to find query_runs
+  const run = await modeRequest(runPath);
+  console.log('[mode] run top-level keys:', Object.keys(run).join(', '));
+
+  // Mode nests query runs in _embedded or directly
+  const queryRuns = run._embedded?.['mode:query_runs']
+    || run._embedded?.query_runs
+    || run.query_runs
+    || [];
+
+  console.log(`[mode] query_runs found: ${queryRuns.length}`);
+
+  if (queryRuns.length > 0) {
+    // Use first query_run's results
+    const qr      = queryRuns[0];
+    const qrToken = qr.token || qr.id;
+    console.log(`[mode] fetching query_run ${qrToken} results`);
+    const contentPath = `${runPath}/query_runs/${qrToken}/results/content.json`;
+    const content = await modeRequest(contentPath);
+    return parseContent(content);
+  }
+
+  // Fallback: try direct results endpoint
+  console.log('[mode] no query_runs, trying direct content.json');
+  const content = await modeRequest(`${runPath}/results/content.json`);
+  console.log('[mode] direct content keys:', Object.keys(content).join(', '));
+  return parseContent(content);
+}
+
+// ─── Main entry: run a report end-to-end ─────────────────────
 async function runReport(reportToken, params) {
   if (!MODE_TOKEN || !MODE_SECRET || !WORKSPACE) {
     throw new Error('Mode credentials not configured (MODE_API_TOKEN, MODE_API_SECRET, MODE_WORKSPACE)');
   }
-
   const runToken = await createRun(reportToken, params);
   await waitForRun(reportToken, runToken);
   return getResults(reportToken, runToken);
 }
-
-// ─── List reports (useful for setup / verifying tokens) ───────
 
 async function listReports() {
   return modeRequest(`/api/${WORKSPACE}/reports`);
