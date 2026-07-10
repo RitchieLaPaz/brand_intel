@@ -79,68 +79,43 @@ async function waitForRun(reportToken, runToken) {
   throw new Error(`Mode run timed out after ${POLL_TIMEOUT_MS / 1000}s`);
 }
 
-// ─── Parse content response (handles Mode's formats) ─────────
+// ─── Parse content response (Mode returns content.json as a flat ──
+// array of row objects, e.g. [{reporting_day: "...", brand_name: "...", ...}, ...]
 function parseContent(content) {
-  let columns = [];
-  let rows    = [];
+  let rows = [];
 
   if (Array.isArray(content)) {
-    // Array of query results — take the first
-    const first = content[0] || {};
-    columns = first.columns || [];
-    rows    = first.rows    || [];
-  } else if (content?.columns) {
-    columns = content.columns;
-    rows    = content.rows || [];
+    // Could be: array of row objects (Mode's actual format), OR
+    // legacy array-of-one wrapper [{columns, rows}]
+    if (content.length > 0 && content[0]?.columns && content[0]?.rows) {
+      // Legacy wrapper format
+      const first = content[0];
+      const colNames = (first.columns || []).map(c => (typeof c === 'object' ? (c.name || c.label) : c));
+      rows = (first.rows || []).map(row =>
+        Array.isArray(row) ? Object.fromEntries(colNames.map((n, i) => [n, row[i]])) : row
+      );
+    } else {
+      // Direct array of row objects — this is Mode's actual format
+      rows = content;
+    }
+  } else if (content?.columns && content?.rows) {
+    const colNames = content.columns.map(c => (typeof c === 'object' ? (c.name || c.label) : c));
+    rows = content.rows.map(row =>
+      Array.isArray(row) ? Object.fromEntries(colNames.map((n, i) => [n, row[i]])) : row
+    );
   } else if (content?.content) {
-    columns = content.content.columns || [];
-    rows    = content.content.rows    || [];
+    return parseContent(content.content);
   }
 
-  // columns can be strings or {name, ...} objects
-  const colNames = columns.map(c => (typeof c === 'object' ? (c.name || c.label || String(c)) : c));
-
-  // rows can be arrays [val, ...] or already objects {col: val}
-  const normalized = rows.map(row =>
-    Array.isArray(row)
-      ? Object.fromEntries(colNames.map((name, i) => [name, row[i]]))
-      : row
-  );
-
-  console.log(`[mode] parsed → ${colNames.length} columns, ${normalized.length} rows`);
-  return { columns: colNames, rows: normalized, rawCount: normalized.length };
+  const columns = rows.length > 0 ? Object.keys(rows[0]) : [];
+  console.log(`[mode] parsed → ${columns.length} columns, ${rows.length} rows`);
+  return { columns, rows, rawCount: rows.length };
 }
 
-// ─── Fetch run results (tries query_runs first, then fallback) ─
+// ─── Fetch run results (Mode's direct content.json endpoint) ──
 async function getResults(reportToken, runToken) {
   const runPath = `/api/${WORKSPACE}/reports/${reportToken}/runs/${runToken}`;
-
-  // Step 1: get run details to find query_runs
-  const run = await modeRequest(runPath);
-  console.log('[mode] run top-level keys:', Object.keys(run).join(', '));
-
-  // Mode nests query runs in _embedded or directly
-  const queryRuns = run._embedded?.['mode:query_runs']
-    || run._embedded?.query_runs
-    || run.query_runs
-    || [];
-
-  console.log(`[mode] query_runs found: ${queryRuns.length}`);
-
-  if (queryRuns.length > 0) {
-    // Use first query_run's results
-    const qr      = queryRuns[0];
-    const qrToken = qr.token || qr.id;
-    console.log(`[mode] fetching query_run ${qrToken} results`);
-    const contentPath = `${runPath}/query_runs/${qrToken}/results/content.json`;
-    const content = await modeRequest(contentPath);
-    return parseContent(content);
-  }
-
-  // Fallback: try direct results endpoint
-  console.log('[mode] no query_runs, trying direct content.json');
-  const content = await modeRequest(`${runPath}/results/content.json`);
-  console.log('[mode] direct content keys:', Object.keys(content).join(', '));
+  const content  = await modeRequest(`${runPath}/results/content.json`);
   return parseContent(content);
 }
 
