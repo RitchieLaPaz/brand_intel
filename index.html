@@ -302,7 +302,16 @@ html{transition:background .2s,color .2s}
       </div>
     </div>
     <div style="margin-left:auto;display:flex;align-items:center;gap:10px">
-      <select class="psel"><option>June 2026</option><option>May 2026</option><option>Q2 2026</option><option>YTD 2026</option></select>
+      <select class="psel" id="timeframeSel" onchange="onTimeframeChange(this)">
+        <option value="day">Day</option>
+        <option value="week">Week</option>
+        <option value="month" selected>Month</option>
+        <option value="quarter">Quarter</option>
+        <option value="ytd">YTD</option>
+        <option value="custom">Custom</option>
+      </select>
+      <input type="date" id="customStart" class="psel" style="display:none" onchange="onCustomDateChange()">
+      <input type="date" id="customEnd" class="psel" style="display:none" onchange="onCustomDateChange()">
       <button class="theme-btn" id="themeBtn" onclick="toggleTheme()" title="Toggle light / dark mode" aria-label="Toggle colour theme"><i class="ti ti-sun" id="themeIcon" style="font-size:15px"></i><span id="themeLabel">Light</span></button>
       <button class="shbtn" onclick="showTab('share')"><i class="ti ti-share"></i> Share Report</button>
     </div>
@@ -749,11 +758,7 @@ function showTab(id) {
 function chBrand(sel) {
   document.getElementById('bdot').style.background = sel.value;
   const n = sel.options[sel.selectedIndex].text;
-  const t = document.getElementById('title-sales');
-  if (t) t.textContent = n + ' — Sales';
-  const sl = document.getElementById('shareLabel');
-  if (sl) sl.textContent = n;
-  loadLiveSales(n);
+  loadLiveSales(n, _currentTimeframe);
 }
 
 // ── User dropdown ──
@@ -841,8 +846,12 @@ function weekLabel(mondayKey) {
   return `${fmt(start)}\u2013${fmt(end).split(' ').pop()}`;
 }
 
-async function fetchSalesData(brandName, timeframe) {
-  const res = await fetch(`/api/data/${encodeURIComponent(brandName)}/sales?timeframe=${timeframe}`);
+async function fetchSalesData(brandName, timeframe, customStart, customEnd) {
+  let url = `/api/data/${encodeURIComponent(brandName)}/sales?timeframe=${timeframe}`;
+  if (timeframe === 'custom' && customStart && customEnd) {
+    url += `&start_date=${customStart}&end_date=${customEnd}`;
+  }
+  const res = await fetch(url);
   if (!res.ok) throw new Error(`API ${res.status}`);
   return res.json();
 }
@@ -961,9 +970,24 @@ function renderSalesEmptyState(message) {
   if (sub) sub.textContent = message;
 }
 
+// ── Global state: current brand + timeframe selection ──────────
+let _currentBrand    = 'Jeeter';
+let _currentTimeframe = 'month';
+let _customStart = null, _customEnd = null;
+
+function updateSalesHeader(brandName) {
+  const t = document.getElementById('title-sales');
+  if (t) t.textContent = brandName + ' \u2014 Sales';
+  const sl = document.getElementById('shareLabel');
+  if (sl) sl.textContent = brandName;
+}
+
 async function loadLiveSales(brandName = 'Jeeter', timeframe = 'month') {
+  _currentBrand = brandName;
+  _currentTimeframe = timeframe;
+  updateSalesHeader(brandName);
   try {
-    const payload = await fetchSalesData(brandName, timeframe);
+    const payload = await fetchSalesData(brandName, timeframe, _customStart, _customEnd);
     const rows = payload.rows || [];
     if (!rows.length) {
       renderSalesEmptyState('No sales data available for this brand and period');
@@ -986,6 +1010,39 @@ async function loadLiveSales(brandName = 'Jeeter', timeframe = 'month') {
   }
 }
 
+// ── Timeframe selector ──────────────────────────────────────────
+function onTimeframeChange(sel) {
+  const tf = sel.value;
+  const customStart = document.getElementById('customStart');
+  const customEnd   = document.getElementById('customEnd');
+  const showCustom  = tf === 'custom';
+  customStart.style.display = showCustom ? 'inline-block' : 'none';
+  customEnd.style.display   = showCustom ? 'inline-block' : 'none';
+
+  if (showCustom) {
+    // Wait for both dates before firing a request
+    if (customStart.value && customEnd.value) {
+      _customStart = customStart.value;
+      _customEnd   = customEnd.value;
+      loadLiveSales(_currentBrand, 'custom');
+    }
+  } else {
+    _customStart = null;
+    _customEnd   = null;
+    loadLiveSales(_currentBrand, tf);
+  }
+}
+
+function onCustomDateChange() {
+  const s = document.getElementById('customStart').value;
+  const e = document.getElementById('customEnd').value;
+  if (s && e) {
+    _customStart = s;
+    _customEnd   = e;
+    loadLiveSales(_currentBrand, 'custom');
+  }
+}
+
 // ── Dynamic brand list ────────────────────────────────────────
 async function loadBrandList() {
   const sel = document.getElementById('brandSel');
@@ -1000,15 +1057,16 @@ async function loadBrandList() {
       `<option value="${b.brand_color || '#888888'}">${b.brand_name}</option>`
     ).join('');
 
-    // Trigger initial load for the first brand (Jeeter should sort first if backend orders it)
+    // Trigger initial load for the first brand (Jeeter sorts first)
     const first = sel.options[0];
     if (first) {
       document.getElementById('bdot').style.background = first.value;
-      loadLiveSales(first.text);
+      loadLiveSales(first.text, _currentTimeframe);
     }
   } catch (err) {
     console.error('[brands] failed to load brand list:', err.message);
-    sel.innerHTML = '<option value="#F59E0B">Jeeter</option>'; // fallback
+    sel.innerHTML = '<option value="#F59E0B">Jeeter</option>';
+    updateSalesHeader('Jeeter');
   }
 }
 
