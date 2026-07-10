@@ -338,11 +338,11 @@ html{transition:background .2s,color .2s}
   <button class="chbtn" id="sd" onclick="setSCh('delivery')">Delivery</button>
   <button class="chbtn" id="sr" onclick="setSCh('retail')">Retail</button>
 </div>
-<div class="krow">
-  <div class="kc"><div class="kl">Gross Sales</div><div class="kv">$218.4K</div><div class="kch up">&#8679; 12.3% vs prior</div></div>
-  <div class="kc"><div class="kl">Net Sales</div><div class="kv">$187.9K</div><div class="kch up">&#8679; 9.8% vs prior</div></div>
-  <div class="kc"><div class="kl">Units Sold</div><div class="kv">4,812</div><div class="kch up">&#8679; 7.1% vs prior</div></div>
-  <div class="kc"><div class="kl">Avg Discount</div><div class="kv">13.9%</div><div class="kch dn">&#8679; 0.8 pts</div></div>
+<div class="krow" id="salesKpiRow">
+  <div class="kc"><div class="kl">Gross Sales</div><div class="kv" id="kpi-gross">$218.4K</div><div class="kch up" id="kpi-gross-ch">&#8679; 12.3% vs prior</div></div>
+  <div class="kc"><div class="kl">Net Sales</div><div class="kv" id="kpi-net">$187.9K</div><div class="kch up" id="kpi-net-ch">&#8679; 9.8% vs prior</div></div>
+  <div class="kc"><div class="kl">Units Sold</div><div class="kv" id="kpi-units">4,812</div><div class="kch up" id="kpi-units-ch">&#8679; 7.1% vs prior</div></div>
+  <div class="kc"><div class="kl">Avg Discount</div><div class="kv" id="kpi-disc">13.9%</div><div class="kch dn" id="kpi-disc-ch">&#8679; 0.8 pts</div></div>
 </div>
 <div class="chcard">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
@@ -359,7 +359,7 @@ html{transition:background .2s,color .2s}
   <th style="width:22%">Week</th><th class="r" style="width:18%">Gross</th>
   <th class="r" style="width:15%">Discounts</th><th class="r" style="width:18%">Net</th>
   <th class="r" style="width:12%">Units</th><th style="width:15%">vs Prior Wk</th>
-</tr></thead><tbody>
+</tr></thead><tbody id="salesWeeklyBody">
   <tr><td>Jun 16&ndash;22</td><td class="r b">$56,200</td><td class="r" style="color:var(--t3)">-$7,830</td><td class="r b">$48,370</td><td class="r">1,247</td><td><span class="bk bg_">&#8679; 8.4%</span></td></tr>
   <tr><td>Jun 9&ndash;15</td><td class="r b">$51,800</td><td class="r" style="color:var(--t3)">-$7,100</td><td class="r b">$44,700</td><td class="r">1,189</td><td><span class="bk bg_">&#8679; 4.1%</span></td></tr>
   <tr><td>Jun 2&ndash;8</td><td class="r b">$49,700</td><td class="r" style="color:var(--t3)">-$6,950</td><td class="r b">$42,950</td><td class="r">1,143</td><td><span class="bk br_">&#8681; 2.3%</span></td></tr>
@@ -736,7 +736,7 @@ function goTo(name) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.body.className = name === 'dash' ? 'dash' : '';
   document.getElementById('s-' + name).classList.add('active');
-  if (name === 'dash' && !window._dc) { setTimeout(drawSalesChart, 150); window._dc = true; }
+  if (name === 'dash' && !window._dc) { setTimeout(() => loadLiveSales(), 150); window._dc = true; }
   if (name === 'report' && !window._rc) { setTimeout(drawRpChart, 150); window._rc = true; }
 }
 
@@ -759,6 +759,7 @@ function chBrand(sel) {
   if (t) t.textContent = n + ' — Sales';
   const sl = document.getElementById('shareLabel');
   if (sl) sl.textContent = n;
+  loadLiveSales(n);
 }
 
 // ── User dropdown ──
@@ -820,6 +821,149 @@ function drawSalesChart() {
     ]
   );
 }
+
+// ── Live data: fetch, aggregate, render ──────────────────────
+let _salesChartInstance = null;
+
+function fmtMoney(n) {
+  const abs = Math.abs(n);
+  if (abs >= 1000) return (n < 0 ? '-$' : '$') + (abs / 1000).toFixed(1) + 'K';
+  return (n < 0 ? '-$' : '$') + abs.toFixed(0);
+}
+function fmtInt(n) { return Math.round(n).toLocaleString('en-US'); }
+
+// ISO week-start (Monday) key for grouping, e.g. "2026-06-16"
+function weekKeyOf(dateStr) {
+  const d = new Date(dateStr);
+  const day = d.getUTCDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setUTCDate(d.getUTCDate() + diff);
+  return d.toISOString().slice(0, 10);
+}
+function weekLabel(mondayKey) {
+  const start = new Date(mondayKey + 'T00:00:00Z');
+  const end   = new Date(start); end.setUTCDate(end.getUTCDate() + 6);
+  const fmt = d => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+  return `${fmt(start)}\u2013${fmt(end).split(' ').pop()}`;
+}
+
+async function fetchSalesData(brandName, timeframe) {
+  const res = await fetch(`/api/data/${encodeURIComponent(brandName)}/sales?timeframe=${timeframe}`);
+  if (!res.ok) throw new Error(`API ${res.status}`);
+  return res.json();
+}
+
+function aggregateByWeek(rows) {
+  const weeks = {}; // weekKey -> { gross, net, discount, units }
+  for (const r of rows) {
+    const wk = weekKeyOf(r.reporting_day);
+    if (!weeks[wk]) weeks[wk] = { gross: 0, net: 0, discount: 0, units: 0 };
+    weeks[wk].gross    += Number(r.gross_sales)     || 0;
+    weeks[wk].net      += Number(r.net_sales)       || 0;
+    weeks[wk].discount += Number(r.promo_discount)  || 0;
+    weeks[wk].units    += Number(r.units_sold)      || 0;
+  }
+  return Object.entries(weeks)
+    .sort((a, b) => b[0].localeCompare(a[0])) // most recent week first
+    .map(([wk, v]) => ({ weekKey: wk, ...v }));
+}
+
+function renderSalesKPIs(rows) {
+  const gross    = rows.reduce((s, r) => s + (Number(r.gross_sales) || 0), 0);
+  const net      = rows.reduce((s, r) => s + (Number(r.net_sales)   || 0), 0);
+  const units    = rows.reduce((s, r) => s + (Number(r.units_sold)  || 0), 0);
+  const discount = rows.reduce((s, r) => s + (Number(r.promo_discount) || 0), 0);
+  const avgDiscRate = gross > 0 ? (discount / gross * 100) : 0;
+
+  const gEl = document.getElementById('kpi-gross');
+  const nEl = document.getElementById('kpi-net');
+  const uEl = document.getElementById('kpi-units');
+  const dEl = document.getElementById('kpi-disc');
+  if (gEl) gEl.textContent = fmtMoney(gross);
+  if (nEl) nEl.textContent = fmtMoney(net);
+  if (uEl) uEl.textContent = fmtInt(units);
+  if (dEl) dEl.textContent = avgDiscRate.toFixed(1) + '%';
+
+  // Hide the "vs prior" change labels — no prior-period comparison available yet from raw rows
+  ['kpi-gross-ch','kpi-net-ch','kpi-units-ch','kpi-disc-ch'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+  });
+}
+
+function renderSalesTable(weekly) {
+  const tbody = document.getElementById('salesWeeklyBody');
+  if (!tbody) return;
+  if (!weekly.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--t3)">No data for this period</td></tr>';
+    return;
+  }
+  tbody.innerHTML = weekly.slice(0, 8).map(w => `
+    <tr>
+      <td>${weekLabel(w.weekKey)}</td>
+      <td class="r b">${fmtMoney(w.gross)}</td>
+      <td class="r" style="color:var(--t3)">-${fmtMoney(w.discount)}</td>
+      <td class="r b">${fmtMoney(w.net)}</td>
+      <td class="r">${fmtInt(w.units)}</td>
+      <td>&mdash;</td>
+    </tr>
+  `).join('');
+}
+
+function renderSalesChart(weekly) {
+  const sorted  = [...weekly].sort((a, b) => a.weekKey.localeCompare(b.weekKey));
+  const labels  = sorted.map(w => weekLabel(w.weekKey).split('\u2013')[0]);
+  const gross   = sorted.map(w => w.gross);
+  const net     = sorted.map(w => w.net);
+
+  const el = document.getElementById('salesChart');
+  if (!el || !window.Chart) return;
+  if (_salesChartInstance) { _salesChartInstance.destroy(); }
+
+  _salesChartInstance = new Chart(el, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label:'Gross', data:gross, borderColor:'#F5A800', backgroundColor:'rgba(245,168,0,0.08)', borderWidth:2, pointBackgroundColor:'#F5A800', pointRadius:3.5, fill:true, tension:0.3 },
+        { label:'Net',   data:net,   borderColor:'#6CB4F5', backgroundColor:'rgba(108,180,245,0.05)', borderWidth:2, borderDash:[5,3], pointBackgroundColor:'#6CB4F5', pointRadius:3.5, fill:true, tension:0.3 }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false, callbacks: { label: c => ' $' + Math.round(c.raw / 1000) + 'K' } } },
+      scales: {
+        x: { grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { color: '#555568', font: { size: 10 } } },
+        y: { grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { color: '#555568', font: { size: 10 }, callback: v => '$' + Math.round(v / 1000) + 'K' } }
+      }
+    }
+  });
+}
+
+async function loadLiveSales(brandName = 'Jeeter', timeframe = 'month') {
+  try {
+    const payload = await fetchSalesData(brandName, timeframe);
+    const rows = payload.rows || [];
+    if (!rows.length) {
+      console.warn('[sales] no rows returned — leaving mock data visible');
+      return;
+    }
+    const weekly = aggregateByWeek(rows);
+    renderSalesKPIs(rows);
+    renderSalesTable(weekly);
+    renderSalesChart(weekly);
+    console.log(`[sales] loaded ${rows.length} rows (${payload.source})`);
+  } catch (err) {
+    console.error('[sales] live data load failed, showing mock data:', err.message);
+  }
+}
+
+// Kick off live load once the dashboard screen is shown
+document.addEventListener('DOMContentLoaded', () => {
+  if (document.getElementById('s-dash')?.classList.contains('active')) {
+    loadLiveSales();
+  }
+});
 
 function drawRpChart() {
   mkChart('rpChart',
