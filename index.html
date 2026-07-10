@@ -756,6 +756,7 @@ html{transition:background .2s,color .2s}
 <script>
 // ── Navigation ──
 function goTo(name) {
+  localStorage.setItem('eaz_screen', name);
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.body.className = name === 'dash' ? 'dash' : '';
   document.getElementById('s-' + name).classList.add('active');
@@ -766,6 +767,7 @@ function goTo(name) {
 // ── Dashboard tabs ──
 const TABS = ['sales','promo','products','inventory','tdp','rankings','pricing','orders','budtenders','campaigns','share'];
 function showTab(id) {
+  localStorage.setItem('eaz_tab', id);
   TABS.forEach(t => {
     const p = document.getElementById('p-' + t);
     const b = document.getElementById('b-' + t);
@@ -1023,6 +1025,8 @@ function updateSalesHeader(brandName) {
 async function loadLiveSales(brandName = 'Jeeter', timeframe = 'month') {
   _currentBrand = brandName;
   _currentTimeframe = timeframe;
+  localStorage.setItem('eaz_brand', brandName);
+  localStorage.setItem('eaz_timeframe', timeframe);
   updateSalesHeader(brandName);
   setLoading(true);
   try {
@@ -1089,6 +1093,8 @@ function onCustomDateChange() {
   if (s && e) {
     _customStart = s;
     _customEnd   = e;
+    localStorage.setItem('eaz_custom_start', s);
+    localStorage.setItem('eaz_custom_end', e);
     loadLiveSales(_currentBrand, 'custom');
   }
 }
@@ -1107,12 +1113,40 @@ async function loadBrandList() {
       `<option value="${b.brand_color || '#888888'}">${b.brand_name}</option>`
     ).join('');
 
-    // Trigger initial load for the first brand (Jeeter sorts first)
-    const first = sel.options[0];
-    if (first) {
-      document.getElementById('bdot').style.background = first.value;
-      loadLiveSales(first.text, _currentTimeframe);
+    // Restore last-viewed brand if it still exists in the list, else default to first (Jeeter)
+    const savedBrand = localStorage.getItem('eaz_brand');
+    let targetOption = sel.options[0];
+    if (savedBrand) {
+      const match = Array.from(sel.options).find(o => o.text === savedBrand);
+      if (match) targetOption = match;
     }
+    sel.value = targetOption.value;
+    // Ensure the correct <option> is selected (value alone may not disambiguate if colors repeat)
+    Array.from(sel.options).forEach(o => { o.selected = (o === targetOption); });
+
+    document.getElementById('bdot').style.background = targetOption.value;
+
+    // Restore saved timeframe (and custom dates) into the selector UI
+    const savedTimeframe = localStorage.getItem('eaz_timeframe') || 'month';
+    const tfSel = document.getElementById('timeframeSel');
+    if (tfSel) tfSel.value = savedTimeframe;
+    if (savedTimeframe === 'custom') {
+      const s = localStorage.getItem('eaz_custom_start');
+      const e = localStorage.getItem('eaz_custom_end');
+      if (s && e) {
+        _customStart = s; _customEnd = e;
+        document.getElementById('customStart').value = s;
+        document.getElementById('customStart').style.display = 'inline-block';
+        document.getElementById('customEnd').value = e;
+        document.getElementById('customEnd').style.display = 'inline-block';
+      }
+    }
+
+    // Restore last-viewed sidebar tab
+    const savedTab = localStorage.getItem('eaz_tab');
+    if (savedTab && TABS.includes(savedTab)) showTab(savedTab);
+
+    loadLiveSales(targetOption.text, savedTimeframe);
   } catch (err) {
     console.error('[brands] failed to load brand list:', err.message);
     sel.innerHTML = '<option value="#F59E0B">Jeeter</option>';
@@ -1120,9 +1154,12 @@ async function loadBrandList() {
   }
 }
 
-// Kick off live load once the dashboard screen is shown
+// Restore last-viewed screen on refresh — avoids bouncing back to login
 document.addEventListener('DOMContentLoaded', () => {
-  if (document.getElementById('s-dash')?.classList.contains('active')) {
+  const savedScreen = localStorage.getItem('eaz_screen');
+  if (savedScreen && savedScreen !== 'login') {
+    goTo(savedScreen);
+  } else if (document.getElementById('s-dash')?.classList.contains('active')) {
     loadBrandList();
   }
 });
