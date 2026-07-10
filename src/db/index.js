@@ -72,6 +72,15 @@ async function getBrands() {
   return rows;
 }
 
+// Global report token — shared across ALL brands (Mode report is parameterized by brand_name)
+async function getReportToken(reportType) {
+  const { rows } = await pool.query(
+    `SELECT mode_token FROM report_config WHERE report_type = $1`,
+    [reportType]
+  );
+  return rows[0]?.mode_token ?? null;
+}
+
 // Lookup by canonical name (used by data.js)
 async function getBrandByName(brandName) {
   const { rows } = await pool.query(
@@ -89,4 +98,4 @@ async function logApiCall(brandName, reportType, source, modeToken, responseMs, 
 }
 
 module.exports = { pool, getCached, setCache, getNarrative, setNarrative,
-                   getBrands, getBrandByName, logApiCall };
+                   getBrands, getBrandByName, getReportToken, logApiCall };
