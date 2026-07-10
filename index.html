@@ -71,6 +71,24 @@ body.dash{overflow:hidden;height:100vh}
 .chbtn.ac{background:var(--s1);color:var(--t1);font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.3)}
 .krow{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px}
 .kc{background:var(--s1);border:1px solid var(--bdr);border-radius:var(--r);padding:14px 16px}
+
+/* ── Loading bar ── */
+.loadbar{position:fixed;top:0;left:0;right:0;height:3px;z-index:2000;background:transparent;pointer-events:none}
+.loadbar.on::after{content:"";display:block;height:100%;width:40%;background:linear-gradient(90deg,transparent,var(--acc),transparent);animation:loadslide 1s ease-in-out infinite}
+@keyframes loadslide{0%{transform:translateX(-100%)}100%{transform:translateX(350%)}}
+
+/* Dim + disable content while loading, without hiding it (avoids blank flash) */
+.dmain.loading .pnl.ac{opacity:.45;pointer-events:none;transition:opacity .15s}
+.loadpill{display:none;align-items:center;gap:7px;font-size:11px;color:var(--t2);background:var(--s2);border:1px solid var(--bdr);border-radius:20px;padding:4px 11px;margin-bottom:12px;width:fit-content}
+.loadpill.on{display:flex}
+.spin{width:11px;height:11px;border:1.5px solid var(--bdr);border-top-color:var(--acc);border-radius:50%;animation:spin .7s linear infinite;flex-shrink:0}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── Empty / no-data state ── */
+.emptycard{background:var(--s1);border:1px dashed var(--bdr2);border-radius:var(--r-lg,12px);padding:36px 24px;text-align:center;margin-bottom:18px}
+.emptycard .ic{font-size:26px;margin-bottom:10px;opacity:.5}
+.emptycard .msg{font-size:13px;font-weight:600;color:var(--t1);margin-bottom:4px}
+.emptycard .sub{font-size:11.5px;color:var(--t3)}
 .kl{font-size:11px;color:var(--t2);font-weight:500;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px}
 .kv{font-size:22px;font-weight:700;letter-spacing:-.5px;font-variant-numeric:tabular-nums}
 .kch{font-size:11px;font-weight:500;margin-top:4px}
@@ -209,6 +227,7 @@ html{transition:background .2s,color .2s}
 </style>
 </head>
 <body class="">
+<div class="loadbar" id="loadbar"></div>
 <div class="screen active" id="s-login">
 <div class="lw">
   <div class="ll">
@@ -336,6 +355,7 @@ html{transition:background .2s,color .2s}
   <main class="dmain"><div class="pnl ac" id="p-sales">
 <div class="ptitle" id="title-sales">Habitat &mdash; Sales</div>
 <div class="psub" id="sub-sales">June 2026 &middot; All channels &middot; 12 locations</div>
+<div class="loadpill" id="salesLoadPill"><div class="spin"></div><span>Loading latest data\u2026</span></div>
 <div class="chtog">
   <button class="chbtn ac" id="sa" onclick="setSCh('all')">All channels</button>
   <button class="chbtn" id="sd" onclick="setSCh('delivery')">Delivery</button>
@@ -954,20 +974,38 @@ function renderSalesChart(weekly) {
   });
 }
 
-function renderSalesEmptyState(message) {
+// ── Loading state ────────────────────────────────────────────
+function setLoading(on) {
+  const bar  = document.getElementById('loadbar');
+  const pill = document.getElementById('salesLoadPill');
+  const main = document.querySelector('.dmain');
+  if (bar)  bar.classList.toggle('on', on);
+  if (pill) pill.classList.toggle('on', on);
+  if (main) main.classList.toggle('loading', on);
+}
+
+function renderSalesEmptyState(message, sub = '') {
   const gEl = document.getElementById('kpi-gross');
   const nEl = document.getElementById('kpi-net');
   const uEl = document.getElementById('kpi-units');
   const dEl = document.getElementById('kpi-disc');
-  [gEl, nEl, uEl, dEl].forEach(el => { if (el) el.textContent = '—'; });
+  [gEl, nEl, uEl, dEl].forEach(el => { if (el) el.textContent = '\u2014'; });
 
   const tbody = document.getElementById('salesWeeklyBody');
-  if (tbody) tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--t3);padding:20px">${message}</td></tr>`;
+  if (tbody) {
+    tbody.innerHTML = `<tr><td colspan="6" style="padding:0;border:none">
+      <div class="emptycard">
+        <div class="ic">\u{1F4ED}</div>
+        <div class="msg">${message}</div>
+        ${sub ? `<div class="sub">${sub}</div>` : ''}
+      </div>
+    </td></tr>`;
+  }
 
   if (_salesChartInstance) { _salesChartInstance.destroy(); _salesChartInstance = null; }
 
-  const sub = document.getElementById('sub-sales');
-  if (sub) sub.textContent = message;
+  const subEl = document.getElementById('sub-sales');
+  if (subEl) subEl.textContent = message;
 }
 
 // ── Global state: current brand + timeframe selection ──────────
@@ -986,11 +1024,15 @@ async function loadLiveSales(brandName = 'Jeeter', timeframe = 'month') {
   _currentBrand = brandName;
   _currentTimeframe = timeframe;
   updateSalesHeader(brandName);
+  setLoading(true);
   try {
     const payload = await fetchSalesData(brandName, timeframe, _customStart, _customEnd);
     const rows = payload.rows || [];
     if (!rows.length) {
-      renderSalesEmptyState('No sales data available for this brand and period');
+      renderSalesEmptyState(
+        `No sales data for ${brandName}`,
+        'Try a different brand or timeframe'
+      );
       console.warn(`[sales] ${brandName}: 0 rows returned`);
       return;
     }
@@ -1002,11 +1044,19 @@ async function loadLiveSales(brandName = 'Jeeter', timeframe = 'month') {
     console.log(`[sales] loaded ${rows.length} rows for ${brandName} (${payload.source})`);
   } catch (err) {
     if (err.message.includes('404') || err.message.includes('not configured')) {
-      renderSalesEmptyState(`Sales report not yet connected for ${brandName}`);
+      renderSalesEmptyState(
+        `Sales not yet connected for ${brandName}`,
+        'This brand\u2019s report is still being wired up'
+      );
     } else {
-      renderSalesEmptyState('Unable to load sales data — try again shortly');
+      renderSalesEmptyState(
+        'Unable to load sales data',
+        'Something went wrong \u2014 try again shortly'
+      );
     }
     console.error(`[sales] ${brandName} load failed:`, err.message);
+  } finally {
+    setLoading(false);
   }
 }
 
