@@ -377,9 +377,14 @@ html{transition:background .2s,color .2s}
   </div>
   <div style="position:relative;height:180px"><canvas id="salesChart"></canvas></div>
 </div>
-<div class="tc"><div class="th">Weekly Breakdown</div>
+<div class="tc"><div class="th" style="display:flex;align-items:center;justify-content:space-between">
+  <span id="breakdownTitle">Weekly Breakdown</span>
+  <select id="breakdownGranSel" onchange="onGranularityChange(this)" style="background:var(--s2);border:1px solid var(--bdr);color:var(--t1);padding:4px 8px;border-radius:6px;font-size:11px;font-weight:500;cursor:pointer">
+    <option value="week">Weekly</option>
+  </select>
+</div>
 <table class="dt"><thead><tr>
-  <th style="width:22%">Week</th><th class="r" style="width:18%">Gross</th>
+  <th style="width:22%" id="breakdownColHeader">Week</th><th class="r" style="width:18%">Gross</th>
   <th class="r" style="width:15%">Discounts</th><th class="r" style="width:18%">Net</th>
   <th class="r" style="width:12%">Units</th><th style="width:15%">vs Prior Wk</th>
 </tr></thead><tbody id="salesWeeklyBody">
@@ -854,20 +859,6 @@ function fmtMoney(n) {
 function fmtInt(n) { return Math.round(n).toLocaleString('en-US'); }
 
 // ISO week-start (Monday) key for grouping, e.g. "2026-06-16"
-function weekKeyOf(dateStr) {
-  const d = new Date(dateStr);
-  const day = d.getUTCDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  d.setUTCDate(d.getUTCDate() + diff);
-  return d.toISOString().slice(0, 10);
-}
-function weekLabel(mondayKey) {
-  const start = new Date(mondayKey + 'T00:00:00Z');
-  const end   = new Date(start); end.setUTCDate(end.getUTCDate() + 6);
-  const fmt = d => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
-  return `${fmt(start)}\u2013${fmt(end).split(' ').pop()}`;
-}
-
 async function fetchSalesData(brandName, timeframe, customStart, customEnd) {
   let url = `/api/data/${encodeURIComponent(brandName)}/sales?timeframe=${timeframe}`;
   if (timeframe === 'custom' && customStart && customEnd) {
@@ -878,19 +869,81 @@ async function fetchSalesData(brandName, timeframe, customStart, customEnd) {
   return res.json();
 }
 
-function aggregateByWeek(rows) {
-  const weeks = {}; // weekKey -> { gross, net, discount, units }
-  for (const r of rows) {
-    const wk = weekKeyOf(r.reporting_day);
-    if (!weeks[wk]) weeks[wk] = { gross: 0, net: 0, discount: 0, units: 0 };
-    weeks[wk].gross    += Number(r.gross_sales)     || 0;
-    weeks[wk].net      += Number(r.net_sales)       || 0;
-    weeks[wk].discount += Number(r.promo_discount)  || 0;
-    weeks[wk].units    += Number(r.units_sold)      || 0;
+function periodKeyOf(row, granularity) {
+  if (granularity === 'day')   return row.reporting_day.slice(0, 10);
+  if (granularity === 'month') return row.month.slice(0, 10);
+  return row.week.slice(0, 10); // Mode already computes Monday-start week for us
+}
+
+function periodLabel(key, granularity) {
+  if (granularity === 'day') {
+    return new Date(key + 'T00:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
   }
-  return Object.entries(weeks)
-    .sort((a, b) => b[0].localeCompare(a[0])) // most recent week first
-    .map(([wk, v]) => ({ weekKey: wk, ...v }));
+  if (granularity === 'month') {
+    return new Date(key + 'T00:00:00Z').toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+  }
+  // week
+  const start = new Date(key + 'T00:00:00Z');
+  const end   = new Date(start); end.setUTCDate(end.getUTCDate() + 6);
+  const fmt = d => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+  return `${fmt(start)}\u2013${fmt(end).split(' ').pop()}`;
+}
+
+function periodColumnHeader(granularity) {
+  return granularity === 'day' ? 'Day' : granularity === 'month' ? 'Month' : 'Week';
+}
+function breakdownTitleFor(granularity) {
+  return granularity === 'day' ? 'Daily Breakdown' : granularity === 'month' ? 'Monthly Breakdown' : 'Weekly Breakdown';
+}
+
+// ── Granularity options available per top-level timeframe ──────
+const GRANULARITY_OPTIONS = {
+  day:     [{ value: 'day',   label: 'Daily'   }, { value: 'week',  label: 'Weekly'  }],
+  week:    [{ value: 'day',   label: 'Daily'   }, { value: 'week',  label: 'Weekly'  }],
+  month:   [{ value: 'week',  label: 'Weekly'  }, { value: 'month', label: 'Monthly' }],
+  quarter: [{ value: 'week',  label: 'Weekly'  }, { value: 'month', label: 'Monthly' }],
+  ytd:     [{ value: 'week',  label: 'Weekly'  }, { value: 'month', label: 'Monthly' }],
+  custom:  [{ value: 'day',   label: 'Daily'   }, { value: 'week',  label: 'Weekly'  }, { value: 'month', label: 'Monthly' }],
+};
+const DEFAULT_GRANULARITY = { day: 'day', week: 'week', month: 'week', quarter: 'week', ytd: 'week', custom: 'week' };
+
+let _currentGranularity = 'week';
+let _lastSalesRows = [];
+
+function populateGranularitySelector(timeframe) {
+  const sel = document.getElementById('breakdownGranSel');
+  if (!sel) return;
+  const opts = GRANULARITY_OPTIONS[timeframe] || GRANULARITY_OPTIONS.month;
+
+  // Restore a saved granularity only if it's valid for this timeframe, else use the default
+  const saved = localStorage.getItem('eaz_granularity');
+  const validSaved = opts.find(o => o.value === saved);
+  const target = validSaved ? saved : (DEFAULT_GRANULARITY[timeframe] || 'week');
+
+  sel.innerHTML = opts.map(o => `<option value="${o.value}">${o.label}</option>`).join('');
+  sel.value = target;
+  _currentGranularity = target;
+}
+
+function onGranularityChange(sel) {
+  _currentGranularity = sel.value;
+  localStorage.setItem('eaz_granularity', _currentGranularity);
+  renderBreakdown(_lastSalesRows, _currentGranularity);
+}
+
+function aggregateByGranularity(rows, granularity) {
+  const groups = {};
+  for (const r of rows) {
+    const key = periodKeyOf(r, granularity);
+    if (!groups[key]) groups[key] = { gross: 0, net: 0, discount: 0, units: 0 };
+    groups[key].gross    += Number(r.gross_sales)    || 0;
+    groups[key].net      += Number(r.net_sales)      || 0;
+    groups[key].discount += Number(r.promo_discount) || 0;
+    groups[key].units    += Number(r.units_sold)     || 0;
+  }
+  return Object.entries(groups)
+    .sort((a, b) => b[0].localeCompare(a[0])) // most recent first
+    .map(([key, v]) => ({ periodKey: key, ...v }));
 }
 
 function renderSalesSubtitle(rows) {
@@ -920,37 +973,38 @@ function renderSalesKPIs(rows) {
   if (uEl) uEl.textContent = fmtInt(units);
   if (dEl) dEl.textContent = avgDiscRate.toFixed(1) + '%';
 
-  // Hide the "vs prior" change labels — no prior-period comparison available yet from raw rows
   ['kpi-gross-ch','kpi-net-ch','kpi-units-ch','kpi-disc-ch'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = 'none';
   });
 }
 
-function renderSalesTable(weekly) {
+function renderSalesTable(periods, granularity) {
   const tbody = document.getElementById('salesWeeklyBody');
+  const colHeader = document.getElementById('breakdownColHeader');
+  if (colHeader) colHeader.textContent = periodColumnHeader(granularity);
   if (!tbody) return;
-  if (!weekly.length) {
+  if (!periods.length) {
     tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--t3)">No data for this period</td></tr>';
     return;
   }
-  tbody.innerHTML = weekly.slice(0, 8).map(w => `
+  tbody.innerHTML = periods.slice(0, 12).map(p => `
     <tr>
-      <td>${weekLabel(w.weekKey)}</td>
-      <td class="r b">${fmtMoney(w.gross)}</td>
-      <td class="r" style="color:var(--t3)">-${fmtMoney(w.discount)}</td>
-      <td class="r b">${fmtMoney(w.net)}</td>
-      <td class="r">${fmtInt(w.units)}</td>
+      <td>${periodLabel(p.periodKey, granularity)}</td>
+      <td class="r b">${fmtMoney(p.gross)}</td>
+      <td class="r" style="color:var(--t3)">-${fmtMoney(p.discount)}</td>
+      <td class="r b">${fmtMoney(p.net)}</td>
+      <td class="r">${fmtInt(p.units)}</td>
       <td>&mdash;</td>
     </tr>
   `).join('');
 }
 
-function renderSalesChart(weekly) {
-  const sorted  = [...weekly].sort((a, b) => a.weekKey.localeCompare(b.weekKey));
-  const labels  = sorted.map(w => weekLabel(w.weekKey).split('\u2013')[0]);
-  const gross   = sorted.map(w => w.gross);
-  const net     = sorted.map(w => w.net);
+function renderSalesChart(periods, granularity) {
+  const sorted  = [...periods].sort((a, b) => a.periodKey.localeCompare(b.periodKey));
+  const labels  = sorted.map(p => periodLabel(p.periodKey, granularity).split('\u2013')[0]);
+  const gross   = sorted.map(p => p.gross);
+  const net     = sorted.map(p => p.net);
 
   const el = document.getElementById('salesChart');
   if (!el || !window.Chart) return;
@@ -1022,6 +1076,14 @@ function updateSalesHeader(brandName) {
   if (sl) sl.textContent = brandName;
 }
 
+function renderBreakdown(rows, granularity) {
+  const titleEl = document.getElementById('breakdownTitle');
+  if (titleEl) titleEl.textContent = breakdownTitleFor(granularity);
+  const periods = aggregateByGranularity(rows, granularity);
+  renderSalesTable(periods, granularity);
+  renderSalesChart(periods, granularity);
+}
+
 async function loadLiveSales(brandName = 'Jeeter', timeframe = 'month') {
   _currentBrand = brandName;
   _currentTimeframe = timeframe;
@@ -1032,6 +1094,7 @@ async function loadLiveSales(brandName = 'Jeeter', timeframe = 'month') {
   try {
     const payload = await fetchSalesData(brandName, timeframe, _customStart, _customEnd);
     const rows = payload.rows || [];
+    _lastSalesRows = rows;
     if (!rows.length) {
       renderSalesEmptyState(
         `No sales data for ${brandName}`,
@@ -1040,11 +1103,10 @@ async function loadLiveSales(brandName = 'Jeeter', timeframe = 'month') {
       console.warn(`[sales] ${brandName}: 0 rows returned`);
       return;
     }
-    const weekly = aggregateByWeek(rows);
+    populateGranularitySelector(timeframe);
     renderSalesSubtitle(rows);
     renderSalesKPIs(rows);
-    renderSalesTable(weekly);
-    renderSalesChart(weekly);
+    renderBreakdown(rows, _currentGranularity);
     console.log(`[sales] loaded ${rows.length} rows for ${brandName} (${payload.source})`);
   } catch (err) {
     if (err.message.includes('404') || err.message.includes('not configured')) {
