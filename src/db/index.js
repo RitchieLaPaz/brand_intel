@@ -66,7 +66,8 @@ async function setNarrative(brandName, reportType, narrative, tokensUsed, ttlHou
 async function getBrands() {
   const { rows } = await pool.query(
     `SELECT brand_id, brand_name, brand_color, mode_reports
-       FROM brands WHERE is_active=TRUE ORDER BY brand_name`
+       FROM brands WHERE is_active=TRUE
+      ORDER BY CASE WHEN brand_name = 'Jeeter' THEN 0 ELSE 1 END, brand_name`
   );
   return rows;
 }
