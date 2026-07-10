@@ -286,13 +286,7 @@ html{transition:background .2s,color .2s}
     <div style="display:flex;align-items:center;gap:8px">
       <div id="bdot" style="width:8px;height:8px;border-radius:50%;background:#4CAF50;flex-shrink:0"></div>
       <select class="bsel" id="brandSel" onchange="chBrand(this)">
-        <option value="#4CAF50">Habitat</option>
-        <option value="#F59E0B">Jeeter</option>
-        <option value="#2196F3">Circles Base Camp</option>
-        <option value="#9C27B0">Cloud</option>
-        <option value="#FF7043">Everyday</option>
-        <option value="#E53935">Anarchy</option>
-        <option value="#607D8B">Circles Eclipse</option>
+        <option value="#F59E0B">Loading brands...</option>
       </select>
     </div>
     <div class="vd"></div>
@@ -736,7 +730,7 @@ function goTo(name) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.body.className = name === 'dash' ? 'dash' : '';
   document.getElementById('s-' + name).classList.add('active');
-  if (name === 'dash' && !window._dc) { setTimeout(() => loadLiveSales(), 150); window._dc = true; }
+  if (name === 'dash' && !window._dc) { setTimeout(() => loadBrandList(), 150); window._dc = true; }
   if (name === 'report' && !window._rc) { setTimeout(drawRpChart, 150); window._rc = true; }
 }
 
@@ -868,6 +862,17 @@ function aggregateByWeek(rows) {
     .map(([wk, v]) => ({ weekKey: wk, ...v }));
 }
 
+function renderSalesSubtitle(rows) {
+  const sub = document.getElementById('sub-sales');
+  if (!sub || !rows.length) return;
+  const dates = rows.map(r => r.reporting_day).sort();
+  const fmt = d => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+  const start = fmt(dates[0]);
+  const end   = fmt(dates[dates.length - 1]);
+  const depots = new Set(rows.map(r => r.depot)).size;
+  sub.textContent = `${start}\u2013${end} \u00b7 All channels \u00b7 ${depots} locations`;
+}
+
 function renderSalesKPIs(rows) {
   const gross    = rows.reduce((s, r) => s + (Number(r.gross_sales) || 0), 0);
   const net      = rows.reduce((s, r) => s + (Number(r.net_sales)   || 0), 0);
@@ -940,28 +945,77 @@ function renderSalesChart(weekly) {
   });
 }
 
+function renderSalesEmptyState(message) {
+  const gEl = document.getElementById('kpi-gross');
+  const nEl = document.getElementById('kpi-net');
+  const uEl = document.getElementById('kpi-units');
+  const dEl = document.getElementById('kpi-disc');
+  [gEl, nEl, uEl, dEl].forEach(el => { if (el) el.textContent = '—'; });
+
+  const tbody = document.getElementById('salesWeeklyBody');
+  if (tbody) tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--t3);padding:20px">${message}</td></tr>`;
+
+  if (_salesChartInstance) { _salesChartInstance.destroy(); _salesChartInstance = null; }
+
+  const sub = document.getElementById('sub-sales');
+  if (sub) sub.textContent = message;
+}
+
 async function loadLiveSales(brandName = 'Jeeter', timeframe = 'month') {
   try {
     const payload = await fetchSalesData(brandName, timeframe);
     const rows = payload.rows || [];
     if (!rows.length) {
-      console.warn('[sales] no rows returned — leaving mock data visible');
+      renderSalesEmptyState('No sales data available for this brand and period');
+      console.warn(`[sales] ${brandName}: 0 rows returned`);
       return;
     }
     const weekly = aggregateByWeek(rows);
+    renderSalesSubtitle(rows);
     renderSalesKPIs(rows);
     renderSalesTable(weekly);
     renderSalesChart(weekly);
-    console.log(`[sales] loaded ${rows.length} rows (${payload.source})`);
+    console.log(`[sales] loaded ${rows.length} rows for ${brandName} (${payload.source})`);
   } catch (err) {
-    console.error('[sales] live data load failed, showing mock data:', err.message);
+    if (err.message.includes('404') || err.message.includes('not configured')) {
+      renderSalesEmptyState(`Sales report not yet connected for ${brandName}`);
+    } else {
+      renderSalesEmptyState('Unable to load sales data — try again shortly');
+    }
+    console.error(`[sales] ${brandName} load failed:`, err.message);
+  }
+}
+
+// ── Dynamic brand list ────────────────────────────────────────
+async function loadBrandList() {
+  const sel = document.getElementById('brandSel');
+  if (!sel) return;
+  try {
+    const res = await fetch('/api/brands');
+    if (!res.ok) throw new Error(`API ${res.status}`);
+    const brands = await res.json();
+    if (!brands.length) return;
+
+    sel.innerHTML = brands.map(b =>
+      `<option value="${b.brand_color || '#888888'}">${b.brand_name}</option>`
+    ).join('');
+
+    // Trigger initial load for the first brand (Jeeter should sort first if backend orders it)
+    const first = sel.options[0];
+    if (first) {
+      document.getElementById('bdot').style.background = first.value;
+      loadLiveSales(first.text);
+    }
+  } catch (err) {
+    console.error('[brands] failed to load brand list:', err.message);
+    sel.innerHTML = '<option value="#F59E0B">Jeeter</option>'; // fallback
   }
 }
 
 // Kick off live load once the dashboard screen is shown
 document.addEventListener('DOMContentLoaded', () => {
   if (document.getElementById('s-dash')?.classList.contains('active')) {
-    loadLiveSales();
+    loadBrandList();
   }
 });
 
