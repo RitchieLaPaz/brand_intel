@@ -979,6 +979,8 @@ function renderSalesKPIs(rows) {
   });
 }
 
+const TABLE_DISPLAY_LIMIT = { day: 31, week: 53, month: 12 };
+
 function renderSalesTable(periods, granularity) {
   const tbody = document.getElementById('salesWeeklyBody');
   const colHeader = document.getElementById('breakdownColHeader');
@@ -988,7 +990,11 @@ function renderSalesTable(periods, granularity) {
     tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--t3)">No data for this period</td></tr>';
     return;
   }
-  tbody.innerHTML = periods.slice(0, 12).map(p => `
+  const limit  = TABLE_DISPLAY_LIMIT[granularity] || 12;
+  const shown  = periods.slice(0, limit);
+  const truncated = periods.length > limit;
+
+  let rowsHtml = shown.map(p => `
     <tr>
       <td>${periodLabel(p.periodKey, granularity)}</td>
       <td class="r b">${fmtMoney(p.gross)}</td>
@@ -998,6 +1004,14 @@ function renderSalesTable(periods, granularity) {
       <td>&mdash;</td>
     </tr>
   `).join('');
+
+  if (truncated) {
+    rowsHtml += `<tr><td colspan="6" style="text-align:center;color:var(--t3);font-size:11px;padding:10px">
+      Showing most recent ${shown.length} of ${periods.length} \u2014 full range visible in chart above
+    </td></tr>`;
+  }
+
+  tbody.innerHTML = rowsHtml;
 }
 
 function renderSalesChart(periods, granularity) {
