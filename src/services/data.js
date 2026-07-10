@@ -66,8 +66,9 @@ async function getData(brandName, reportType, timeframe = 'month', customStart, 
   const brand = await db.getBrandByName(brandName);
   if (!brand) throw new Error(`Brand not found: ${brandName}`);
 
-  const reportToken = brand.mode_reports?.[reportType];
-  if (!reportToken) throw new Error(`No Mode report token configured for ${brandName}.${reportType}`);
+  // Report tokens are GLOBAL — same report works for every brand via {{brand_name}} param
+  const reportToken = await db.getReportToken(reportType);
+  if (!reportToken) throw new Error(`No Mode report configured for report type: ${reportType}`);
 
   const { start_date, end_date } = computeDateRange(timeframe, customStart, customEnd);
 
@@ -142,7 +143,7 @@ async function refreshBrand(brandName, timeframe = 'month') {
   const { start_date, end_date } = computeDateRange(timeframe);
   const results = [];
   for (const reportType of REPORT_TYPES) {
-    const token = brand.mode_reports?.[reportType];
+    const token = await db.getReportToken(reportType);
     if (!token) continue;
     try {
       await _fetchFromMode(brand, token, brandName, reportType, timeframe, start_date, end_date);
