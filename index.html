@@ -356,7 +356,13 @@ html{transition:background .2s,color .2s}
     <button class="tbtn" id="b-share" onclick="showTab('share')" style="margin-top:auto"><i class="ti ti-share"></i>Share report</button>
   </nav>
   <main class="dmain"><div class="pnl ac" id="p-sales">
-<div class="ptitle" id="title-sales">Habitat &mdash; Sales</div>
+<div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+  <div class="ptitle" id="title-sales">Habitat &mdash; Sales</div>
+  <button id="refreshBtn" onclick="refreshSalesData()" title="Force a fresh pull from Mode, bypassing cache" style="background:var(--s2);border:1px solid var(--bdr);color:var(--t2);padding:5px 11px;border-radius:6px;font-size:11.5px;font-weight:500;cursor:pointer;display:flex;align-items:center;gap:6px;flex-shrink:0">
+    <i class="ti ti-refresh" id="refreshIcon" style="font-size:14px"></i>
+    <span id="refreshLabel">Refresh data</span>
+  </button>
+</div>
 <div class="psub" id="sub-sales">June 2026 &middot; All channels &middot; 12 locations</div>
 <div class="loadpill" id="salesLoadPill"><div class="spin"></div><span>Loading latest data\u2026</span></div>
 <div class="chtog">
@@ -1107,6 +1113,53 @@ function renderBreakdown(rows, granularity) {
   const periods = aggregateByGranularity(rows, granularity);
   renderSalesTable(periods, granularity);
   renderSalesChart(periods, granularity);
+}
+
+// ── Manual refresh button — bypasses cache, forces a live Mode pull ──
+async function refreshSalesData() {
+  const btn   = document.getElementById('refreshBtn');
+  const icon  = document.getElementById('refreshIcon');
+  const label = document.getElementById('refreshLabel');
+  if (!btn) return;
+
+  btn.disabled = true;
+  btn.style.opacity = '0.6';
+  btn.style.cursor = 'wait';
+  if (icon)  icon.style.animation = 'spin 0.7s linear infinite';
+  if (label) label.textContent = 'Refreshing\u2026';
+  setLoading(true);
+
+  try {
+    const body = { timeframe: _currentTimeframe };
+    if (_currentTimeframe === 'custom') {
+      body.start_date = _customStart;
+      body.end_date   = _customEnd;
+    }
+    const res = await fetch(`/api/data/${encodeURIComponent(_currentBrand)}/sales/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`API ${res.status}`);
+    const result = await res.json();
+    console.log(`[refresh] ${_currentBrand}: ${result.row_count} rows, source=${result.source}`);
+
+    // Re-run the normal load so all rendering paths (empty-state, KPIs, etc.) stay consistent
+    await loadLiveSales(_currentBrand, _currentTimeframe);
+
+    if (label) label.textContent = 'Refreshed \u2713';
+    setTimeout(() => { if (label) label.textContent = 'Refresh data'; }, 2000);
+  } catch (err) {
+    console.error('[refresh] failed:', err.message);
+    if (label) label.textContent = 'Refresh failed';
+    setTimeout(() => { if (label) label.textContent = 'Refresh data'; }, 2500);
+  } finally {
+    btn.disabled = false;
+    btn.style.opacity = '1';
+    btn.style.cursor = 'pointer';
+    if (icon) icon.style.animation = '';
+    setLoading(false);
+  }
 }
 
 async function loadLiveSales(brandName = 'Jeeter', timeframe = 'month') {
