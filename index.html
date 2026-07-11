@@ -322,9 +322,12 @@ html{transition:background .2s,color .2s}
     </div>
     <div style="margin-left:auto;display:flex;align-items:center;gap:10px">
       <select class="psel" id="timeframeSel" onchange="onTimeframeChange(this)">
-        <option value="day">Day</option>
-        <option value="week">Week</option>
-        <option value="month" selected>Month</option>
+        <option value="day">Current Day</option>
+        <option value="yesterday">Yesterday</option>
+        <option value="week">Current Week</option>
+        <option value="last_week">Last Week</option>
+        <option value="month" selected>MTD</option>
+        <option value="last_month">Last Month</option>
         <option value="quarter">Quarter</option>
         <option value="ytd">YTD</option>
         <option value="custom">Custom</option>
@@ -898,14 +901,22 @@ function breakdownTitleFor(granularity) {
 
 // ── Granularity options available per top-level timeframe ──────
 const GRANULARITY_OPTIONS = {
-  day:     [{ value: 'day',   label: 'Daily'   }, { value: 'week',  label: 'Weekly'  }],
-  week:    [{ value: 'day',   label: 'Daily'   }, { value: 'week',  label: 'Weekly'  }],
-  month:   [{ value: 'week',  label: 'Weekly'  }, { value: 'month', label: 'Monthly' }],
-  quarter: [{ value: 'week',  label: 'Weekly'  }, { value: 'month', label: 'Monthly' }],
-  ytd:     [{ value: 'week',  label: 'Weekly'  }, { value: 'month', label: 'Monthly' }],
-  custom:  [{ value: 'day',   label: 'Daily'   }, { value: 'week',  label: 'Weekly'  }, { value: 'month', label: 'Monthly' }],
+  day:        [{ value: 'day',   label: 'Daily'   }],
+  yesterday:  [{ value: 'day',   label: 'Daily'   }],
+  week:       [{ value: 'day',   label: 'Daily'   }, { value: 'week',  label: 'Weekly'  }],
+  last_week:  [{ value: 'day',   label: 'Daily'   }, { value: 'week',  label: 'Weekly'  }],
+  month:      [{ value: 'week',  label: 'Weekly'  }, { value: 'month', label: 'Monthly' }],
+  last_month: [{ value: 'week',  label: 'Weekly'  }, { value: 'month', label: 'Monthly' }],
+  quarter:    [{ value: 'week',  label: 'Weekly'  }, { value: 'month', label: 'Monthly' }],
+  ytd:        [{ value: 'week',  label: 'Weekly'  }, { value: 'month', label: 'Monthly' }],
+  custom:     [{ value: 'day',   label: 'Daily'   }, { value: 'week',  label: 'Weekly'  }, { value: 'month', label: 'Monthly' }],
 };
-const DEFAULT_GRANULARITY = { day: 'day', week: 'week', month: 'week', quarter: 'week', ytd: 'week', custom: 'week' };
+const DEFAULT_GRANULARITY = {
+  day: 'day', yesterday: 'day',
+  week: 'week', last_week: 'day',
+  month: 'week', last_month: 'week',
+  quarter: 'week', ytd: 'week', custom: 'week',
+};
 
 let _currentGranularity = 'week';
 let _lastSalesRows = [];
