@@ -21,6 +21,12 @@ function computeDateRange(timeframe, customStart, customEnd) {
     case 'day':
       return { start_date: today, end_date: today };
 
+    case 'yesterday': {
+      const d = new Date(now);
+      d.setDate(d.getDate() - 1);
+      return { start_date: fmt(d), end_date: fmt(d) };
+    }
+
     case 'week': {
       const d    = new Date(now);
       const day  = d.getDay();
@@ -29,9 +35,27 @@ function computeDateRange(timeframe, customStart, customEnd) {
       return { start_date: fmt(d), end_date: today };
     }
 
+    case 'last_week': {
+      // This week's Monday, then shift back 7 days for last week's Monday–Sunday
+      const d    = new Date(now);
+      const day  = d.getDay();
+      const diff = day === 0 ? -6 : 1 - day;
+      d.setDate(d.getDate() + diff);        // this week's Monday
+      d.setDate(d.getDate() - 7);            // last week's Monday
+      const start = new Date(d);
+      const end   = new Date(d); end.setDate(end.getDate() + 6); // last week's Sunday
+      return { start_date: fmt(start), end_date: fmt(end) };
+    }
+
     case 'month': {
       const d = new Date(now.getFullYear(), now.getMonth(), 1);
       return { start_date: fmt(d), end_date: today };
+    }
+
+    case 'last_month': {
+      const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const end   = new Date(now.getFullYear(), now.getMonth(), 0); // day 0 = last day of prev month
+      return { start_date: fmt(start), end_date: fmt(end) };
     }
 
     case 'quarter': {
