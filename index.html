@@ -838,10 +838,10 @@ function mkChart(id, labels, datasets) {
     data: { labels, datasets },
     options: {
       responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false, callbacks: { label: c => ' $' + Math.round(c.raw / 1000) + 'K' } } },
+      plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false, callbacks: { label: c => ' ' + fmtMoney(c.raw) } } },
       scales: {
         x: { grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { color: '#555568', font: { size: 10 } } },
-        y: { grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { color: '#555568', font: { size: 10 }, callback: v => '$' + Math.round(v / 1000) + 'K' }, min: 30000, max: 70000 }
+        y: { grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { color: '#555568', font: { size: 10 }, callback: v => fmtMoney(v) }, min: 30000, max: 70000 }
       }
     }
   });
@@ -862,8 +862,10 @@ let _salesChartInstance = null;
 
 function fmtMoney(n) {
   const abs = Math.abs(n);
-  if (abs >= 1000) return (n < 0 ? '-$' : '$') + (abs / 1000).toFixed(1) + 'K';
-  return (n < 0 ? '-$' : '$') + abs.toFixed(0);
+  const sign = n < 0 ? '-$' : '$';
+  if (abs >= 1_000_000) return sign + (abs / 1_000_000).toFixed(4) + 'M';
+  if (abs >= 1000)      return sign + (abs / 1000).toFixed(1) + 'K';
+  return sign + abs.toFixed(0);
 }
 function fmtInt(n) { return Math.round(n).toLocaleString('en-US'); }
 
@@ -1052,10 +1054,10 @@ function renderSalesChart(periods, granularity) {
     },
     options: {
       responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false, callbacks: { label: c => ' $' + Math.round(c.raw / 1000) + 'K' } } },
+      plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false, callbacks: { label: c => ' ' + fmtMoney(c.raw) } } },
       scales: {
         x: { grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { color: '#555568', font: { size: 10 } } },
-        y: { grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { color: '#555568', font: { size: 10 }, callback: v => '$' + Math.round(v / 1000) + 'K' } }
+        y: { grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { color: '#555568', font: { size: 10 }, callback: v => fmtMoney(v) } }
       }
     }
   });
