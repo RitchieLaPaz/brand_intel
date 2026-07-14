@@ -72,6 +72,37 @@ body.dash{overflow:hidden;height:100vh}
 .krow{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px}
 .kc{background:var(--s1);border:1px solid var(--bdr);border-radius:var(--r);padding:14px 16px}
 
+/* ── Query Bud floating chat widget ── */
+.qbFab{position:fixed;bottom:22px;right:22px;width:56px;height:56px;border-radius:50%;background:var(--acc);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:26px;z-index:3000;box-shadow:0 6px 18px rgba(0,0,0,.35);transition:transform .15s}
+.qbFab:hover{transform:scale(1.06)}
+.qbFab .qbDot{position:absolute;top:4px;right:4px;width:10px;height:10px;border-radius:50%;background:#4CAF50;border:2px solid var(--bg)}
+.qbPanel{position:fixed;bottom:90px;right:22px;width:340px;max-height:480px;background:var(--s1);border:1px solid var(--bdr);border-radius:14px;box-shadow:0 12px 32px rgba(0,0,0,.4);z-index:3000;display:none;flex-direction:column;overflow:hidden}
+.qbPanel.open{display:flex}
+.qbHead{background:var(--s2);padding:12px 14px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--bdr)}
+.qbAvatar{width:34px;height:34px;border-radius:50%;background:var(--acc);display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0}
+.qbTitle{font-size:13px;font-weight:700;color:var(--t1)}
+.qbSub{font-size:10.5px;color:var(--t3);display:flex;align-items:center;gap:4px}
+.qbSub .dot{width:6px;height:6px;border-radius:50%;background:#4CAF50;display:inline-block}
+.qbClose{margin-left:auto;background:transparent;border:none;color:var(--t3);cursor:pointer;font-size:18px;padding:4px}
+.qbClose:hover{color:var(--t1)}
+.qbBody{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px}
+.qbMsg{max-width:85%;font-size:12.5px;line-height:1.5;padding:9px 12px;border-radius:12px}
+.qbMsg.bot{background:var(--s2);color:var(--t1);align-self:flex-start;border-bottom-left-radius:4px}
+.qbMsg.user{background:var(--acc);color:#000;align-self:flex-end;border-bottom-right-radius:4px;font-weight:500}
+.qbChips{display:flex;flex-direction:column;gap:6px;margin-top:2px}
+.qbChip{background:var(--s2);border:1px solid var(--bdr);color:var(--t1);font-size:11.5px;padding:8px 11px;border-radius:9px;cursor:pointer;text-align:left;transition:background .12s}
+.qbChip:hover{background:var(--s3)}
+.qbTyping{display:flex;gap:4px;padding:9px 12px;background:var(--s2);border-radius:12px;align-self:flex-start;width:fit-content}
+.qbTyping span{width:6px;height:6px;border-radius:50%;background:var(--t3);animation:qbBounce 1.2s infinite}
+.qbTyping span:nth-child(2){animation-delay:.15s}
+.qbTyping span:nth-child(3){animation-delay:.3s}
+@keyframes qbBounce{0%,60%,100%{transform:translateY(0);opacity:.4}30%{transform:translateY(-4px);opacity:1}}
+.qbInputRow{border-top:1px solid var(--bdr);padding:10px;display:flex;gap:8px;background:var(--s1)}
+.qbInput{flex:1;background:var(--s2);border:1px solid var(--bdr);color:var(--t1);border-radius:9px;padding:8px 11px;font-size:12px;outline:none}
+.qbInput:focus{border-color:var(--acc)}
+.qbSend{background:var(--acc);border:none;color:#000;width:34px;height:34px;border-radius:9px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0}
+.qbSend:hover{opacity:.9}
+
 /* ── Loading bar ── */
 .loadbar{position:fixed;top:0;left:0;right:0;height:3px;z-index:2000;background:transparent;pointer-events:none}
 .loadbar.on::after{content:"";display:block;height:100%;width:40%;background:linear-gradient(90deg,transparent,var(--acc),transparent);animation:loadslide 1s ease-in-out infinite}
@@ -228,6 +259,36 @@ html{transition:background .2s,color .2s}
 </head>
 <body class="">
 <div class="loadbar" id="loadbar"></div>
+
+<button class="qbFab" id="qbFab" onclick="toggleQueryBud()" title="Ask Query Bud" aria-label="Open Query Bud chat">
+  <span class="qbDot"></span>
+  &#127807;
+</button>
+
+<div class="qbPanel" id="qbPanel">
+  <div class="qbHead">
+    <div class="qbAvatar">&#127807;</div>
+    <div>
+      <div class="qbTitle">Query Bud</div>
+      <div class="qbSub"><span class="dot"></span>Ready to dig in</div>
+    </div>
+    <button class="qbClose" onclick="toggleQueryBud()" aria-label="Close chat">&times;</button>
+  </div>
+  <div class="qbBody" id="qbBody">
+    <div class="qbMsg bot">Hey Bud! &#127807; I'm Query Bud &mdash; ask me anything about your brand's numbers in plain English. No SQL required, I've already smoked through the data for you.</div>
+    <div class="qbChips" id="qbChips">
+      <button class="qbChip" onclick="qbAsk(this)">What's my top selling SKU this month?</button>
+      <button class="qbChip" onclick="qbAsk(this)">Which brand is trending up the most?</button>
+      <button class="qbChip" onclick="qbAsk(this)">Show me Jeeter's sales vs last week</button>
+      <button class="qbChip" onclick="qbAsk(this)">Any inventory I should worry about?</button>
+    </div>
+  </div>
+  <div class="qbInputRow">
+    <input type="text" class="qbInput" id="qbInput" placeholder="Ask about your data..." onkeydown="if(event.key==='Enter')qbSend()">
+    <button class="qbSend" onclick="qbSend()" aria-label="Send"><i class="ti ti-send"></i></button>
+  </div>
+</div>
+
 <div class="screen active" id="s-login">
 <div class="lw">
   <div class="ll">
@@ -1483,6 +1544,72 @@ function switchMode(mode) {
     const savedMiTab = localStorage.getItem('eaz_mi_tab');
     showMiTab(MI_TABS.includes(savedMiTab) ? savedMiTab : 'mi-sales');
   }
+}
+
+// ── Query Bud floating chat widget ──
+const QB_RESPONSES = {
+  sku:      "Your top SKU this month is <strong>1g Preroll 5pk</strong> \u2014 $41.2K in net sales, up 12% vs last month. Second place isn't close.",
+  brand:    "<strong>Jeeter</strong> is your fastest riser right now, up 18.7% month-over-month. Anarchy's close behind at 15.8%.",
+  jeeter:   "Jeeter did $56.2K gross this week vs $51.8K last week \u2014 that's an 8.4% bump. Nice trend, keep an eye on discount rate though, it ticked up 0.8pts.",
+  inventory:"Yeah, two spots need attention: LA Downtown is down to 5.9 days of stock on 1g Preroll 5pk, and SD Bay's Infused Pre-Roll is at 6.1 days. Might want to get a PO moving.",
+  default: [
+    "That's a good one \u2014 I'm still growing into a full connection to your live data, but once wired up I'll pull the real answer straight from Mode.",
+    "Noted! I don't have that plugged in just yet, but this is exactly the kind of question I'm built to answer once I'm fully rooted in.",
+    "Good question. I'm a mockup for now \u2014 once the real backend's connected I'll dig through Redshift and give you a straight answer.",
+  ],
+};
+
+function toggleQueryBud() {
+  document.getElementById('qbPanel').classList.toggle('open');
+}
+
+function qbAppendMsg(text, sender) {
+  const body = document.getElementById('qbBody');
+  const div = document.createElement('div');
+  div.className = 'qbMsg ' + sender;
+  div.innerHTML = text;
+  body.appendChild(div);
+  body.scrollTop = body.scrollHeight;
+  return div;
+}
+
+function qbRespond(userText) {
+  const body = document.getElementById('qbBody');
+  const typing = document.createElement('div');
+  typing.className = 'qbTyping';
+  typing.innerHTML = '<span></span><span></span><span></span>';
+  body.appendChild(typing);
+  body.scrollTop = body.scrollHeight;
+
+  const lower = userText.toLowerCase();
+  let reply;
+  if (lower.includes('sku') || lower.includes('top sell')) reply = QB_RESPONSES.sku;
+  else if (lower.includes('trend') || lower.includes('brand is')) reply = QB_RESPONSES.brand;
+  else if (lower.includes('jeeter')) reply = QB_RESPONSES.jeeter;
+  else if (lower.includes('inventory') || lower.includes('worry')) reply = QB_RESPONSES.inventory;
+  else reply = QB_RESPONSES.default[Math.floor(Math.random() * QB_RESPONSES.default.length)];
+
+  setTimeout(() => {
+    typing.remove();
+    qbAppendMsg(reply, 'bot');
+  }, 900 + Math.random() * 500);
+}
+
+function qbAsk(chipEl) {
+  const text = chipEl.textContent;
+  document.getElementById('qbChips').style.display = 'none';
+  qbAppendMsg(text, 'user');
+  qbRespond(text);
+}
+
+function qbSend() {
+  const input = document.getElementById('qbInput');
+  const text = input.value.trim();
+  if (!text) return;
+  document.getElementById('qbChips').style.display = 'none';
+  qbAppendMsg(text, 'user');
+  input.value = '';
+  qbRespond(text);
 }
 
 function toggleTheme() {
