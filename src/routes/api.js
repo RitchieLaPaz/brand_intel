@@ -8,7 +8,7 @@
 
 const router = require('express').Router();
 const { pool, getBrands } = require('../db');
-const { getData, getNarrative } = require('../services/data');
+const { getData, getNarrative, getDataForChannel } = require('../services/data');
 const crypto = require('crypto');
 
 function requireAuth(req, res, next) {
@@ -49,23 +49,29 @@ router.get('/brands', requireAuth, async (req, res) => {
 
 router.get('/data/:brandName/:reportType', requireAuth, async (req, res) => {
   const { brandName, reportType } = req.params;
-  const { timeframe = 'month', start_date, end_date } = req.query;
+  const { timeframe = 'month', start_date, end_date, channel = 'all' } = req.query;
 
   if (timeframe === 'custom' && (!start_date || !end_date)) {
     return res.status(400).json({ error: 'custom timeframe requires start_date and end_date (YYYY-MM-DD)' });
   }
+  if (!['all', 'delivery', 'retail'].includes(channel)) {
+    return res.status(400).json({ error: "channel must be 'all', 'delivery', or 'retail'" });
+  }
 
   try {
-    const result = await getData(brandName, reportType, timeframe, start_date, end_date);
+    const result = await getDataForChannel(brandName, reportType, channel, timeframe, start_date, end_date);
     res.json({
-      brand_name:  brandName,
-      report_type: reportType,
+      brand_name:        brandName,
+      report_type:       reportType,
       timeframe,
-      source:      result.source,
-      fetched_at:  result.fetchedAt,
-      columns:     result.data?.columns ?? [],
-      rows:        result.data?.rows    ?? [],
-      row_count:   result.data?.rows?.length ?? 0,
+      channel,
+      source:             result.source,
+      fetched_at:         result.fetchedAt,
+      channels_included:  result.channelsIncluded,
+      retail_available:   result.retailAvailable,
+      columns:            result.data?.columns ?? [],
+      rows:               result.data?.rows    ?? [],
+      row_count:          result.data?.rows?.length ?? 0,
     });
   } catch (err) {
     const status = err.message.includes('not found') ? 404 : 500;
@@ -76,14 +82,17 @@ router.get('/data/:brandName/:reportType', requireAuth, async (req, res) => {
 // ─── POST /api/data/:brandName/:reportType/refresh ────────────
 router.post('/data/:brandName/:reportType/refresh', requireAuth, async (req, res) => {
   const { brandName, reportType } = req.params;
-  const { timeframe = 'month', start_date, end_date } = req.body;
+  const { timeframe = 'month', start_date, end_date, channel = 'all' } = req.body;
   try {
+    // Clear both delivery and retail cache entries — harmless if retail's
+    // report_type row doesn't exist yet, and keeps refresh correct once it does.
     await pool.query(
-      `DELETE FROM query_cache WHERE brand_id = $1 AND report_type = $2`,
-      [brandName, reportType]
+      `DELETE FROM query_cache WHERE brand_id = $1 AND report_type IN ($2, $3)`,
+      [brandName, reportType, `${reportType}_retail`]
     );
-    const result = await getData(brandName, reportType, timeframe, start_date, end_date);
-    res.json({ success: true, source: result.source, row_count: result.data?.rows?.length ?? 0 });
+    const result = await getDataForChannel(brandName, reportType, channel, timeframe, start_date, end_date);
+    res.json({ success: true, source: result.source, row_count: result.data?.rows?.length ?? 0,
+               channels_included: result.channelsIncluded, retail_available: result.retailAvailable });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
