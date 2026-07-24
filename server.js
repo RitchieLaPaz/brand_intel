@@ -8,6 +8,19 @@ const PORT      = process.env.PORT || 3000;
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// ── Disable caching entirely ─────────────────────────────────────
+// This app is a single index.html with all JS inline. If the browser (or any
+// proxy/CDN in front of Railway) caches that file, a deploy can silently keep
+// serving old JavaScript logic indefinitely via 304 Not Modified responses —
+// which is exactly what caused auth checks to appear to "not exist" even
+// after the server-side fix was live. Force a fresh fetch every time.
+app.use((req, res, next) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+  next();
+});
+
 // ── Session ─────────────────────────────────────────────────────
 // Use PostgreSQL session store if DATABASE_URL is set, else memory
 let sessionStore;
@@ -67,7 +80,7 @@ console.log('[auth] Google OAuth configured');
 app.get('/auth/logout', (req, res) => { req.session.destroy(); res.redirect('/?logout=success'); });
 
 // ── Shared report portal ────────────────────────────────────────
-app.get('/r/:token', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+app.get('/r/:token', (req, res) => res.sendFile(path.join(__dirname, 'index.html'), { etag: false, lastModified: false, cacheControl: false }));
 
 // ── API routes ──────────────────────────────────────────────────
 try {
@@ -79,8 +92,8 @@ try {
 }
 
 // ── Static frontend ─────────────────────────────────────────────
-app.use(express.static(path.join(__dirname)));
-app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+app.use(express.static(path.join(__dirname), { etag: false, lastModified: false, cacheControl: false }));
+app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'index.html'), { etag: false, lastModified: false, cacheControl: false }));
 
 // ── Start ───────────────────────────────────────────────────────
 app.listen(PORT, () => {
