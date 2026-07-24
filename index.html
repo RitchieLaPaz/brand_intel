@@ -1046,10 +1046,24 @@ async function fetchSalesData(brandName, timeframe, customStart, customEnd, chan
   return res.json();
 }
 
+function _computeMondayStart(dateStr) {
+  const d = new Date(dateStr.slice(0, 10) + 'T00:00:00Z');
+  const day = d.getUTCDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setUTCDate(d.getUTCDate() + diff);
+  return d.toISOString().slice(0, 10);
+}
+function _computeMonthStart(dateStr) {
+  return dateStr.slice(0, 7) + '-01';
+}
+
 function periodKeyOf(row, granularity) {
-  if (granularity === 'day')   return row.reporting_day.slice(0, 10);
-  if (granularity === 'month') return row.month.slice(0, 10);
-  return row.week.slice(0, 10); // Mode already computes Monday-start week for us
+  // Not every Mode report precomputes week/month columns the way delivery's
+  // does (confirmed missing on at least one retail report) — fall back to
+  // deriving them from reporting_day client-side rather than crashing.
+  if (granularity === 'day') return row.reporting_day.slice(0, 10);
+  if (granularity === 'month') return row.month ? row.month.slice(0, 10) : _computeMonthStart(row.reporting_day);
+  return row.week ? row.week.slice(0, 10) : _computeMondayStart(row.reporting_day);
 }
 
 function periodLabel(period, granularity) {
