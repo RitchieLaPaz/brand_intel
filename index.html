@@ -452,6 +452,10 @@ html{transition:background .2s,color .2s}
   <button class="chbtn" id="sd" onclick="setSCh('delivery')">Delivery</button>
   <button class="chbtn" id="sr" onclick="setSCh('retail')">Retail</button>
 </div>
+<div id="retailVarianceNotice" style="display:none;align-items:center;gap:7px;font-size:11px;color:var(--t2);background:var(--s2);border:1px solid var(--bdr);border-radius:8px;padding:7px 11px;margin-bottom:12px;width:fit-content" title="Retail figures may show a small variance (~2-5%) compared to Sweed's native reports, due to a known data quality issue in the Sweed Replica database. Delivery figures are unaffected. Figures remain directionally accurate for trend analysis.">
+  <i class="ti ti-info-circle" style="color:var(--acc);font-size:14px;flex-shrink:0"></i>
+  <span>Retail figures may vary ~2\u20135% from Sweed's native reports (known data quality issue \u2014 delivery unaffected, directionally accurate for trends)</span>
+</div>
 <div class="krow" id="salesKpiRow">
   <div class="kc"><div class="kl">Gross Sales</div><div class="kv" id="kpi-gross">$218.4K</div><div class="kch up" id="kpi-gross-ch">&#8679; 12.3% vs prior</div></div>
   <div class="kc"><div class="kl">Net Sales</div><div class="kv" id="kpi-net">$187.9K</div><div class="kch up" id="kpi-net-ch">&#8679; 9.8% vs prior</div></div>
@@ -965,24 +969,12 @@ function setSCh(c) {
   ['sa','sd','sr'].forEach(id => document.getElementById(id).classList.remove('ac'));
   const m = {all:'sa', delivery:'sd', retail:'sr'};
   document.getElementById(m[c]).classList.add('ac');
-
-  if (c === 'retail') {
-    // Sweed/retail schema isn't wired yet — show a clear notice instead of
-    // silently leaving stale delivery numbers on screen (this was the QC bug:
-    // clicking Retail changed the label but not the actual data underneath).
-    renderSalesEmptyState(
-      'Retail data coming soon',
-      'This dashboard currently reflects delivery channel only'
-    );
-    return;
-  }
-
-  // All / Delivery — restore live data from the last successful fetch
-  if (_lastSalesRows && _lastSalesRows.length) {
-    renderSalesSubtitle(_lastSalesRows);
-    renderSalesKPIs(_lastSalesRows);
-    renderBreakdown(_lastSalesRows, _currentGranularity);
-  }
+  _currentChannel = c;
+  localStorage.setItem('eaz_channel', c);
+  // Channel materially changes which Mode report(s) get queried (retail is a
+  // separate source from delivery) — always refetch rather than just
+  // filtering cached rows client-side.
+  loadLiveSales(_currentBrand, _currentTimeframe);
 }
 
 // ── Products channel ──
@@ -1044,8 +1036,8 @@ function fmtMoney(n) {
 function fmtInt(n) { return Math.round(n).toLocaleString('en-US'); }
 
 // ISO week-start (Monday) key for grouping, e.g. "2026-06-16"
-async function fetchSalesData(brandName, timeframe, customStart, customEnd) {
-  let url = `/api/data/${encodeURIComponent(brandName)}/sales?timeframe=${timeframe}`;
+async function fetchSalesData(brandName, timeframe, customStart, customEnd, channel = 'all') {
+  let url = `/api/data/${encodeURIComponent(brandName)}/sales?timeframe=${timeframe}&channel=${channel}`;
   if (timeframe === 'custom' && customStart && customEnd) {
     url += `&start_date=${customStart}&end_date=${customEnd}`;
   }
@@ -1263,6 +1255,9 @@ function renderSalesEmptyState(message, sub = '') {
   const dEl = document.getElementById('kpi-disc');
   [gEl, nEl, uEl, dEl].forEach(el => { if (el) el.textContent = '\u2014'; });
 
+  const varianceNotice = document.getElementById('retailVarianceNotice');
+  if (varianceNotice) varianceNotice.style.display = 'none';
+
   const tbody = document.getElementById('salesWeeklyBody');
   if (tbody) {
     tbody.innerHTML = `<tr><td colspan="6" style="padding:0;border:none">
@@ -1280,9 +1275,10 @@ function renderSalesEmptyState(message, sub = '') {
   if (subEl) subEl.textContent = message;
 }
 
-// ── Global state: current brand + timeframe selection ──────────
+// ── Global state: current brand + timeframe + channel selection ──
 let _currentBrand    = 'Jeeter';
 let _currentTimeframe = 'month';
+let _currentChannel  = 'all';
 let _customStart = null, _customEnd = null;
 
 function updateSalesHeader(brandName) {
@@ -1315,7 +1311,7 @@ async function refreshSalesData() {
   setLoading(true);
 
   try {
-    const body = { timeframe: _currentTimeframe };
+    const body = { timeframe: _currentTimeframe, channel: _currentChannel };
     if (_currentTimeframe === 'custom') {
       body.start_date = _customStart;
       body.end_date   = _customEnd;
@@ -1355,9 +1351,18 @@ async function loadLiveSales(brandName = 'Jeeter', timeframe = 'month') {
   updateSalesHeader(brandName);
   setLoading(true);
   try {
-    const payload = await fetchSalesData(brandName, timeframe, _customStart, _customEnd);
+    const payload = await fetchSalesData(brandName, timeframe, _customStart, _customEnd, _currentChannel);
     const rows = payload.rows || [];
     _lastSalesRows = rows;
+
+    if (_currentChannel === 'retail' && payload.source === 'unavailable') {
+      renderSalesEmptyState(
+        'Retail data coming soon',
+        'This dashboard currently reflects delivery channel only'
+      );
+      return;
+    }
+
     if (!rows.length) {
       renderSalesEmptyState(
         `No sales data for ${brandName}`,
@@ -1366,11 +1371,29 @@ async function loadLiveSales(brandName = 'Jeeter', timeframe = 'month') {
       console.warn(`[sales] ${brandName}: 0 rows returned`);
       return;
     }
+
     populateGranularitySelector(timeframe);
     renderSalesSubtitle(rows);
     renderSalesKPIs(rows);
     renderBreakdown(rows, _currentGranularity);
-    console.log(`[sales] loaded ${rows.length} rows for ${brandName} (${payload.source})`);
+
+    // "All channels" selected but retail isn't wired yet — numbers are
+    // delivery-only for now. Say so rather than silently under-reporting.
+    if (_currentChannel === 'all' && payload.retail_available === false) {
+      const sub = document.getElementById('sub-sales');
+      if (sub) sub.textContent += ' \u00b7 delivery only, retail pending';
+    }
+
+    // Known Sweed Replica data quality issue causes a small variance vs
+    // Sweed's own native reports — show the disclaimer whenever real
+    // retail rows are actually part of what's currently rendered.
+    const varianceNotice = document.getElementById('retailVarianceNotice');
+    if (varianceNotice) {
+      const hasRetailRows = rows.some(r => r.channel === 'retail');
+      varianceNotice.style.display = hasRetailRows ? 'flex' : 'none';
+    }
+
+    console.log(`[sales] loaded ${rows.length} rows for ${brandName} (${payload.source}, channel=${_currentChannel})`);
   } catch (err) {
     if (err.message.includes('404') || err.message.includes('not configured')) {
       renderSalesEmptyState(
@@ -1466,6 +1489,13 @@ async function loadBrandList() {
         document.getElementById('customEnd').style.display = 'inline-block';
       }
     }
+
+    // Restore saved channel (All / Delivery / Retail)
+    const savedChannel = localStorage.getItem('eaz_channel') || 'all';
+    _currentChannel = savedChannel;
+    const chBtnMap = {all:'sa', delivery:'sd', retail:'sr'};
+    ['sa','sd','sr'].forEach(id => document.getElementById(id)?.classList.remove('ac'));
+    document.getElementById(chBtnMap[savedChannel])?.classList.add('ac');
 
     // Restore last-viewed sidebar tab
     const savedTab = localStorage.getItem('eaz_tab');
