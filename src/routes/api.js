@@ -16,6 +16,21 @@ function requireAuth(req, res, next) {
   res.status(401).json({ error: 'Unauthorized' });
 }
 
+// ─── GET /api/session ──────────────────────────────────────────
+// Public endpoint (no requireAuth) — lets the frontend check real server-side
+// auth state before trusting any client-side saved screen/tab state.
+router.get('/session', (req, res) => {
+  if (req.session?.user) {
+    res.json({
+      authenticated: true,
+      email: req.session.user.email,
+      name:  req.session.user.name || req.session.user.email,
+    });
+  } else {
+    res.json({ authenticated: false });
+  }
+});
+
 // ─── GET /api/brands ──────────────────────────────────────────
 router.get('/brands', requireAuth, async (req, res) => {
   try {
