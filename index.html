@@ -376,11 +376,11 @@ html{transition:background .2s,color .2s}
     <div class="vd"></div>
     <div class="uw" id="uw">
       <button class="ubtn" onclick="tU(event)">
-        <div class="av">RM</div> Rich M.
+        <div class="av" id="userAvatar">--</div> <span id="userName">Loading...</span>
         <i class="ti ti-chevron-down" style="font-size:11px;color:var(--t3)"></i>
       </button>
       <div class="umenu" id="umenu">
-        <div class="uem">rich.m@eaze.com</div>
+        <div class="uem" id="userEmail">&nbsp;</div>
         <button class="ubm" onclick="closeU()"><i class="ti ti-settings"></i>Account settings</button>
         <button class="ubm dng" onclick="window.location.href='/auth/logout'"><i class="ti ti-logout"></i>Sign out</button>
       </div>
@@ -1479,19 +1479,37 @@ async function loadBrandList() {
   }
 }
 
+// ── Populate real logged-in user info (replaces mock "Rich M.") ──
+function getInitials(name, email) {
+  const source = (name && name.trim()) ? name : (email || '');
+  const parts = source.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return '??';
+}
+
+function populateUserInfo(name, email) {
+  const avatarEl = document.getElementById('userAvatar');
+  const nameEl    = document.getElementById('userName');
+  const emailEl   = document.getElementById('userEmail');
+  const displayName = name || email || 'Unknown user';
+
+  if (avatarEl) avatarEl.textContent = getInitials(name, email);
+  if (nameEl)   nameEl.textContent   = displayName;
+  if (emailEl)  emailEl.textContent  = email || '';
+}
+
 // Restore last-viewed screen + mode on refresh — avoids bouncing back to login
-document.addEventListener('DOMContentLoaded', () => {
+// unnecessarily, but ALWAYS verifies against the real server session first —
+// stale localStorage (e.g. from a previous logged-in visit) must never be
+// enough on its own to show the dashboard.
+document.addEventListener('DOMContentLoaded', async () => {
   const savedMode = localStorage.getItem('eaz_mode') || 'brand';
   switchMode(savedMode);
 
-  // Fresh Google OAuth login lands here with no prior localStorage state —
-  // without this check the static HTML default (login screen) would show
-  // even though the user is now actually authenticated server-side.
   const params = new URLSearchParams(window.location.search);
 
   if (params.get('logout') === 'success') {
-    // Server session is gone — clear all client-side state so we don't
-    // try to restore a dashboard view that will just 401 on every API call.
     ['eaz_screen','eaz_tab','eaz_brand','eaz_timeframe','eaz_granularity',
      'eaz_custom_start','eaz_custom_end','eaz_mode','eaz_mi_tab'].forEach(k => localStorage.removeItem(k));
     window.history.replaceState({}, '', window.location.pathname);
@@ -1502,14 +1520,33 @@ document.addEventListener('DOMContentLoaded', () => {
   if (params.get('auth') === 'success') {
     window.history.replaceState({}, '', window.location.pathname);
     goTo('dash');
+    // fall through to the session check below so user info gets populated too
+  }
+
+  // Ask the server whether this session is actually real before honoring
+  // any saved screen state.
+  let authenticated = false;
+  try {
+    const res = await fetch('/api/session');
+    const data = await res.json();
+    authenticated = !!data.authenticated;
+    if (authenticated) populateUserInfo(data.name, data.email);
+  } catch (err) {
+    console.error('[auth] session check failed:', err.message);
+  }
+
+  if (!authenticated) {
+    // Not really logged in — clear stale state and force login, no exceptions.
+    ['eaz_screen','eaz_tab'].forEach(k => localStorage.removeItem(k));
+    goTo('login');
     return;
   }
 
   const savedScreen = localStorage.getItem('eaz_screen');
   if (savedScreen && savedScreen !== 'login') {
     goTo(savedScreen);
-  } else if (document.getElementById('s-dash')?.classList.contains('active')) {
-    loadBrandList();
+  } else {
+    goTo('dash');
   }
 });
 
