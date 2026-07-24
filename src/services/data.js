@@ -215,8 +215,14 @@ async function _tryGetData(brandName, reportType, timeframe, customStart, custom
 // as soon as the real Sales (Retail) column names are confirmed — nothing
 // else needs to change.
 const RETAIL_FIELD_ALIASES = {
-  // Confirmed by SQL Wiz — gross_sales, net_sales, units_sold already match
-  // delivery's naming exactly, no alias needed for those.
+  // Confirmed by SQL Wiz: gross_sales, net_sales, units_sold are all their
+  // own real columns in the retail query, deliberately named to match
+  // delivery already — no alias needed for those three.
+  //
+  // gross_receipts is a SEPARATE, genuinely different metric (NetSales +
+  // TaxesAmount) sitting alongside gross_sales, not a replacement name for
+  // it — do NOT alias gross_receipts to gross_sales, that would silently
+  // substitute a tax-inclusive figure for a discount-inclusive one.
   'total_discounts': 'promo_discount',
 };
 
