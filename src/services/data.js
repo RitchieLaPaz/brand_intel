@@ -179,4 +179,119 @@ async function refreshBrand(brandName, timeframe = 'month') {
   return results;
 }
 
-module.exports = { getData, getNarrative, refreshBrand, computeDateRange, REPORT_TYPES };
+// ─── Channel-aware fetching (Delivery + Retail) ────────────────
+// Retail lives in a separate Postgres source (Sweed RO), not the same
+// Redshift cluster as delivery — Mode can't join across the two in one
+// query. So each channel gets its OWN Mode report per tab, and "All
+// channels" is merged here at the app layer, not via SQL UNION.
+//
+// Convention: retail's report_config row uses `${baseReportType}_retail`
+// as its report_type key, e.g. 'sales' (delivery) + 'sales_retail' (retail).
+// Until that key exists in report_config, retail gracefully reports as
+// "unavailable" rather than throwing — so this code needs ZERO changes
+// once SQL Wiz's retail token is actually added; it just starts working.
+
+const CHANNEL_REPORT_SUFFIX = { retail: '_retail' };
+
+function channelReportType(baseReportType, channel) {
+  const suffix = CHANNEL_REPORT_SUFFIX[channel];
+  return suffix ? `${baseReportType}${suffix}` : baseReportType;
+}
+
+async function _tryGetData(brandName, reportType, timeframe, customStart, customEnd) {
+  try {
+    const result = await getData(brandName, reportType, timeframe, customStart, customEnd);
+    return { ok: true, ...result };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+// Retail's Mode query may not use identical column names to delivery's
+// (e.g. `gross_receipts` instead of `gross_sales`) — SQL Wiz flagged this
+// as a real possibility. Rather than let the frontend's aggregation
+// silently sum `undefined` as NaN, normalize any known retail-side aliases
+// to delivery's canonical names here, once, in one place. Update this map
+// as soon as the real Sales (Retail) column names are confirmed — nothing
+// else needs to change.
+const RETAIL_FIELD_ALIASES = {
+  // Confirmed by SQL Wiz — gross_sales, net_sales, units_sold already match
+  // delivery's naming exactly, no alias needed for those.
+  'total_discounts': 'promo_discount',
+};
+
+function _normalizeChannelFields(row, channel) {
+  if (channel !== 'retail') return row;
+  const normalized = { ...row };
+  for (const [retailField, canonicalField] of Object.entries(RETAIL_FIELD_ALIASES)) {
+    if (retailField in normalized && !(canonicalField in normalized)) {
+      normalized[canonicalField] = normalized[retailField];
+    }
+  }
+  return normalized;
+}
+
+function _tagRows(rows, channel) {
+  return (rows || []).map(r => ({ ..._normalizeChannelFields(r, channel), channel }));
+}
+
+// channel: 'all' | 'delivery' | 'retail'
+async function getDataForChannel(brandName, baseReportType, channel = 'all', timeframe = 'month', customStart, customEnd) {
+  if (channel === 'delivery') {
+    const res = await _tryGetData(brandName, baseReportType, timeframe, customStart, customEnd);
+    if (!res.ok) throw new Error(res.error);
+    return {
+      data: { columns: res.data.columns, rows: _tagRows(res.data.rows, 'delivery') },
+      source: res.source, fetchedAt: res.fetchedAt,
+      channelsIncluded: ['delivery'], retailAvailable: false,
+    };
+  }
+
+  if (channel === 'retail') {
+    const retailType = channelReportType(baseReportType, 'retail');
+    const res = await _tryGetData(brandName, retailType, timeframe, customStart, customEnd);
+    if (!res.ok) {
+      // Retail not wired yet — signal unavailable rather than throwing,
+      // so the frontend can show a clear "coming soon" state.
+      return {
+        data: { columns: [], rows: [] }, source: 'unavailable', fetchedAt: null,
+        channelsIncluded: [], retailAvailable: false,
+      };
+    }
+    return {
+      data: { columns: res.data.columns, rows: _tagRows(res.data.rows, 'retail') },
+      source: res.source, fetchedAt: res.fetchedAt,
+      channelsIncluded: ['retail'], retailAvailable: true,
+    };
+  }
+
+  // channel === 'all' — fetch both in parallel, merge whatever succeeds
+  const retailType = channelReportType(baseReportType, 'retail');
+  const [deliveryRes, retailRes] = await Promise.all([
+    _tryGetData(brandName, baseReportType, timeframe, customStart, customEnd),
+    _tryGetData(brandName, retailType, timeframe, customStart, customEnd),
+  ]);
+
+  if (!deliveryRes.ok) throw new Error(deliveryRes.error); // delivery is the baseline; a real failure here should surface
+
+  const channelsIncluded = ['delivery'];
+  let rows    = _tagRows(deliveryRes.data.rows, 'delivery');
+  let columns = deliveryRes.data.columns;
+
+  if (retailRes.ok) {
+    channelsIncluded.push('retail');
+    rows = rows.concat(_tagRows(retailRes.data.rows, 'retail'));
+    columns = Array.from(new Set([...columns, ...retailRes.data.columns]));
+  }
+
+  return {
+    data: { columns, rows },
+    source: deliveryRes.source,
+    fetchedAt: deliveryRes.fetchedAt,
+    channelsIncluded,
+    retailAvailable: retailRes.ok,
+  };
+}
+
+module.exports = { getData, getNarrative, refreshBrand, computeDateRange, REPORT_TYPES,
+                    getDataForChannel, CHANNEL_REPORT_SUFFIX };
