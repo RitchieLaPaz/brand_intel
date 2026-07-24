@@ -28,49 +28,43 @@ app.use(session({
   cookie: { secure: process.env.NODE_ENV === 'production', maxAge: 8 * 3_600_000 },
 }));
 
-// ── Google OAuth (only if credentials are configured) ───────────
+// ── Google OAuth (required — no demo/open-access fallback) ──────
 const GOOGLE_CONFIGURED = process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET;
 
-if (GOOGLE_CONFIGURED) {
-  const passport       = require('passport');
-  const GoogleStrategy = require('passport-google-oauth20').Strategy;
-
-  passport.use(new GoogleStrategy({
-    clientID:     process.env.GOOGLE_CLIENT_ID,
-    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    callbackURL:  `${process.env.APP_URL || 'http://localhost:3000'}/auth/google/callback`,
-  }, (accessToken, refreshToken, profile, done) => {
-    const email = profile.emails?.[0]?.value;
-    if (!email?.endsWith(process.env.ALLOWED_EMAIL_DOMAIN || '@eaze.com')) {
-      return done(null, false, { message: 'Access restricted' });
-    }
-    done(null, { id: profile.id, email, name: profile.displayName });
-  }));
-
-  passport.serializeUser((user, done)   => done(null, user));
-  passport.deserializeUser((user, done) => done(null, user));
-
-  app.use(passport.initialize());
-  app.use(passport.session());
-
-  app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
-  app.get('/auth/google/callback',
-    passport.authenticate('google', { failureRedirect: '/?error=unauthorized' }),
-    (req, res) => { req.session.user = req.user; res.redirect('/'); }
-  );
-  console.log('[auth] Google OAuth configured');
-} else {
-  // No OAuth — auto-set a demo session so API routes are accessible
-  app.use((req, res, next) => {
-    if (!req.session.user) {
-      req.session.user = { email: 'demo@eaze.com', name: 'Demo User' };
-    }
-    next();
-  });
-  console.warn('[auth] GOOGLE_CLIENT_ID not set — running in demo mode (no auth)');
+if (!GOOGLE_CONFIGURED) {
+  console.error('[auth] FATAL: GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET not set. Refusing to start with open access.');
+  process.exit(1);
 }
 
-app.get('/auth/logout', (req, res) => { req.session.destroy(); res.redirect('/'); });
+const passport       = require('passport');
+const GoogleStrategy = require('passport-google-oauth20').Strategy;
+
+passport.use(new GoogleStrategy({
+  clientID:     process.env.GOOGLE_CLIENT_ID,
+  clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+  callbackURL:  `${process.env.APP_URL || 'http://localhost:3000'}/auth/google/callback`,
+}, (accessToken, refreshToken, profile, done) => {
+  const email = profile.emails?.[0]?.value;
+  if (!email?.endsWith(process.env.ALLOWED_EMAIL_DOMAIN || '@eaze.com')) {
+    return done(null, false, { message: 'Access restricted' });
+  }
+  done(null, { id: profile.id, email, name: profile.displayName });
+}));
+
+passport.serializeUser((user, done)   => done(null, user));
+passport.deserializeUser((user, done) => done(null, user));
+
+app.use(passport.initialize());
+app.use(passport.session());
+
+app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
+app.get('/auth/google/callback',
+  passport.authenticate('google', { failureRedirect: '/?error=unauthorized' }),
+  (req, res) => { req.session.user = req.user; res.redirect('/?auth=success'); }
+);
+console.log('[auth] Google OAuth configured');
+
+app.get('/auth/logout', (req, res) => { req.session.destroy(); res.redirect('/?logout=success'); });
 
 // ── Shared report portal ────────────────────────────────────────
 app.get('/r/:token', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
