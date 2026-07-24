@@ -971,8 +971,24 @@ function setSCh(c) {
   ['sa','sd','sr'].forEach(id => document.getElementById(id).classList.remove('ac'));
   const m = {all:'sa', delivery:'sd', retail:'sr'};
   document.getElementById(m[c]).classList.add('ac');
-  const s = {all:'June 2026 · All channels · 12 locations', delivery:'June 2026 · Delivery · 7 depots', retail:'June 2026 · Retail · 5 stores'};
-  document.getElementById('sub-sales').textContent = s[c];
+
+  if (c === 'retail') {
+    // Sweed/retail schema isn't wired yet — show a clear notice instead of
+    // silently leaving stale delivery numbers on screen (this was the QC bug:
+    // clicking Retail changed the label but not the actual data underneath).
+    renderSalesEmptyState(
+      'Retail data coming soon',
+      'This dashboard currently reflects delivery channel only'
+    );
+    return;
+  }
+
+  // All / Delivery — restore live data from the last successful fetch
+  if (_lastSalesRows && _lastSalesRows.length) {
+    renderSalesSubtitle(_lastSalesRows);
+    renderSalesKPIs(_lastSalesRows);
+    renderBreakdown(_lastSalesRows, _currentGranularity);
+  }
 }
 
 // ── Products channel ──
@@ -1050,18 +1066,24 @@ function periodKeyOf(row, granularity) {
   return row.week.slice(0, 10); // Mode already computes Monday-start week for us
 }
 
-function periodLabel(key, granularity) {
+function periodLabel(period, granularity) {
+  const key = period.periodKey;
   if (granularity === 'day') {
     return new Date(key + 'T00:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
   }
   if (granularity === 'month') {
     return new Date(key + 'T00:00:00Z').toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
   }
-  // week
-  const start = new Date(key + 'T00:00:00Z');
-  const end   = new Date(start); end.setUTCDate(end.getUTCDate() + 6);
+  // week — label reflects the ACTUAL date range present in the data, not the raw
+  // calendar-week key. This matters at reporting-period boundaries (e.g. an MTD
+  // view starting July 1st): Mode's week column anchors to June 29 (the Monday),
+  // but the query itself was clipped to July 1 onward, so the label should say
+  // "Jul 1–5", not "Jun 29–5" — the earlier bug this fixes.
+  const start = new Date((period.minDate || key) + 'T00:00:00Z');
+  const end   = new Date((period.maxDate || key) + 'T00:00:00Z');
   const fmt = d => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
-  return `${fmt(start)}\u2013${fmt(end).split(' ').pop()}`;
+  const sameMonth = start.getUTCMonth() === end.getUTCMonth() && start.getUTCFullYear() === end.getUTCFullYear();
+  return sameMonth ? `${fmt(start)}\u2013${fmt(end).split(' ').pop()}` : `${fmt(start)}\u2013${fmt(end)}`;
 }
 
 function periodColumnHeader(granularity) {
@@ -1118,11 +1140,14 @@ function aggregateByGranularity(rows, granularity) {
   const groups = {};
   for (const r of rows) {
     const key = periodKeyOf(r, granularity);
-    if (!groups[key]) groups[key] = { gross: 0, net: 0, discount: 0, units: 0 };
+    const day = r.reporting_day.slice(0, 10);
+    if (!groups[key]) groups[key] = { gross: 0, net: 0, discount: 0, units: 0, minDate: day, maxDate: day };
     groups[key].gross    += Number(r.gross_sales)    || 0;
     groups[key].net      += Number(r.net_sales)      || 0;
     groups[key].discount += Number(r.promo_discount) || 0;
     groups[key].units    += Number(r.units_sold)     || 0;
+    if (day < groups[key].minDate) groups[key].minDate = day;
+    if (day > groups[key].maxDate) groups[key].maxDate = day;
   }
   return Object.entries(groups)
     .sort((a, b) => b[0].localeCompare(a[0])) // most recent first
@@ -1179,7 +1204,7 @@ function renderSalesTable(periods, granularity) {
 
   let rowsHtml = shown.map(p => `
     <tr>
-      <td>${periodLabel(p.periodKey, granularity)}</td>
+      <td>${periodLabel(p, granularity)}</td>
       <td class="r b">${fmtMoney(p.gross)}</td>
       <td class="r" style="color:var(--t3)">-${fmtMoney(p.discount)}</td>
       <td class="r b">${fmtMoney(p.net)}</td>
@@ -1199,7 +1224,7 @@ function renderSalesTable(periods, granularity) {
 
 function renderSalesChart(periods, granularity) {
   const sorted  = [...periods].sort((a, b) => a.periodKey.localeCompare(b.periodKey));
-  const labels  = sorted.map(p => periodLabel(p.periodKey, granularity).split('\u2013')[0]);
+  const labels  = sorted.map(p => periodLabel(p, granularity).split('\u2013')[0]);
   const gross   = sorted.map(p => p.gross);
   const net     = sorted.map(p => p.net);
 
