@@ -1,8 +1,15 @@
-// server.js — Eaze Brand Intelligence
+]// server.js — Eaze Brand Intelligence
 const express   = require('express');
 const session   = require('express-session');
 const path      = require('path');
 const app       = express();
+
+// Railway terminates HTTPS at its edge and forwards to this app over plain
+// HTTP internally. Without this, Express doesn't know the connection is
+// actually secure, and our session cookie's `secure: true` flag can silently
+// fail to persist — causing OAuth login to appear to succeed but bounce
+// straight back to the login screen on the very next request.
+app.set('trust proxy', 1);
 const PORT      = process.env.PORT || 3000;
 
 // Bump this string any time you deploy, so you can confirm in DevTools
