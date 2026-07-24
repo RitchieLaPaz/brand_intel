@@ -1,4 +1,4 @@
-]// server.js — Eaze Brand Intelligence
+// server.js — Eaze Brand Intelligence
 const express   = require('express');
 const session   = require('express-session');
 const path      = require('path');
