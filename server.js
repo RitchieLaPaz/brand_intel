@@ -5,19 +5,28 @@ const path      = require('path');
 const app       = express();
 const PORT      = process.env.PORT || 3000;
 
+// Bump this string any time you deploy, so you can confirm in DevTools
+// Network tab → Response Headers → X-App-Build that the file you're LOOKING
+// AT in the browser is actually the file that's running on the server.
+const APP_BUILD = 'no-cache-fix-2026-07-24';
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// ── Disable caching entirely ─────────────────────────────────────
+// ── Disable caching entirely (belt AND suspenders) ───────────────
 // This app is a single index.html with all JS inline. If the browser (or any
-// proxy/CDN in front of Railway) caches that file, a deploy can silently keep
-// serving old JavaScript logic indefinitely via 304 Not Modified responses —
-// which is exactly what caused auth checks to appear to "not exist" even
-// after the server-side fix was live. Force a fresh fetch every time.
+// proxy/CDN) caches that file, a deploy can silently keep serving old
+// JavaScript logic indefinitely via 304 Not Modified responses.
 app.use((req, res, next) => {
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.set('Pragma', 'no-cache');
   res.set('Expires', '0');
+  res.set('Surrogate-Control', 'no-store'); // some CDNs/edge proxies honor this specifically
+  res.set('X-App-Build', APP_BUILD);        // diagnostic — check this in Network tab response headers
+  // Defensively strip any conditional-cache headers that slip through from
+  // static/sendFile before the response is actually flushed to the client.
+  res.removeHeader('ETag');
+  res.removeHeader('Last-Modified');
   next();
 });
 
@@ -75,9 +84,16 @@ app.get('/auth/google/callback',
   passport.authenticate('google', { failureRedirect: '/?error=unauthorized' }),
   (req, res) => { req.session.user = req.user; res.redirect('/?auth=success'); }
 );
-console.log('[auth] Google OAuth configured');
+console.log(`[auth] Google OAuth configured — build ${APP_BUILD}`);
 
 app.get('/auth/logout', (req, res) => { req.session.destroy(); res.redirect('/?logout=success'); });
+
+// ── Diagnostic endpoint — confirms which build is actually running ──
+// Visit this directly in a browser to sanity-check deployment state,
+// independent of any HTML/JS caching questions entirely.
+app.get('/__version', (req, res) => {
+  res.json({ build: APP_BUILD, time: new Date().toISOString() });
+});
 
 // ── Shared report portal ────────────────────────────────────────
 app.get('/r/:token', (req, res) => res.sendFile(path.join(__dirname, 'index.html'), { etag: false, lastModified: false, cacheControl: false }));
@@ -97,7 +113,7 @@ app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'index.html'), { et
 
 // ── Start ───────────────────────────────────────────────────────
 app.listen(PORT, () => {
-  console.log(`Eaze Brand Intelligence on port ${PORT}`);
+  console.log(`Eaze Brand Intelligence on port ${PORT} — build ${APP_BUILD}`);
 
   // Start cron scheduler
   try {
