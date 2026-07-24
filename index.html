@@ -340,21 +340,15 @@ html{transition:background .2s,color .2s}
     <div>
       <div style="font-size:19px;font-weight:500;color:var(--t1);letter-spacing:-.3px;margin-bottom:3px">Brand Intelligence</div>
       <div style="font-size:12px;color:var(--t2);margin-bottom:28px">Sign in with your Eaze account to continue</div>
-      <button class="lg" onclick="goTo('dash')">
+      <button class="lg" onclick="window.location.href='/auth/google'">
         <svg width="17" height="17" viewBox="0 0 18 18" fill="none"><path d="M17.64 9.2C17.64 8.57 17.58 7.95 17.48 7.36H9v2.99h4.84c-.21 1.13-.84 2.08-1.79 2.72v2.26h2.91c1.7-1.57 2.68-3.87 2.68-6.03z" fill="#4285F4"/><path d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.91-2.26c-.8.54-1.84.86-3.05.86-2.34 0-4.33-1.58-5.04-3.71H.96v2.33C2.44 15.98 5.48 18 9 18z" fill="#34A853"/><path d="M3.96 10.71c-.18-.54-.28-1.12-.28-1.71 0-.59.1-1.17.28-1.71V4.96H.96C.35 6.17 0 7.55 0 9s.35 2.83.96 4.04l3-2.33z" fill="#FBBC05"/><path d="M9 3.58c1.32 0 2.51.45 3.44 1.34l2.58-2.58C13.46.89 11.43 0 9 0 5.48 0 2.44 2.02.96 4.96l3 2.33C4.67 5.16 6.66 3.58 9 3.58z" fill="#EA4335"/></svg>
         Continue with Google
       </button>
-      <div class="lor"><div class="lord"></div><span style="font-size:11px;color:var(--t3)">or</span><div class="lord"></div></div>
-      <button class="ld" onclick="goTo('dash')"><i class="ti ti-eye" style="font-size:14px"></i> View demo dashboard &mdash; no login needed</button>
       <div style="margin-top:22px;padding-top:16px;border-top:.5px solid var(--bdr);text-align:center">
         <div style="font-size:10.5px;color:var(--t2)"><i class="ti ti-lock" style="font-size:11px;vertical-align:-1px"></i> Access restricted to <strong style="color:var(--t1)">@eaze.com</strong> accounts</div>
         <div style="font-size:9.5px;color:var(--t3);margin-top:6px">Brand partners: open your shared link directly</div>
       </div>
-      <div style="margin-top:20px;background:var(--s2);border:.5px solid var(--bdr);border-radius:8px;padding:10px 12px">
-        <div style="font-size:9.5px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--t3);margin-bottom:5px">Demo mode</div>
-        <div style="font-size:11px;color:var(--t2);line-height:1.5">Loads Jeeter sample data. No credentials required.</div>
       </div>
-    </div>
   </div>
 </div>
 </div>
@@ -388,7 +382,7 @@ html{transition:background .2s,color .2s}
       <div class="umenu" id="umenu">
         <div class="uem">rich.m@eaze.com</div>
         <button class="ubm" onclick="closeU()"><i class="ti ti-settings"></i>Account settings</button>
-        <button class="ubm dng" onclick="goTo('login')"><i class="ti ti-logout"></i>Sign out</button>
+        <button class="ubm dng" onclick="window.location.href='/auth/logout'"><i class="ti ti-logout"></i>Sign out</button>
       </div>
     </div>
     <div style="margin-left:auto;display:flex;align-items:center;gap:10px">
@@ -1489,6 +1483,27 @@ async function loadBrandList() {
 document.addEventListener('DOMContentLoaded', () => {
   const savedMode = localStorage.getItem('eaz_mode') || 'brand';
   switchMode(savedMode);
+
+  // Fresh Google OAuth login lands here with no prior localStorage state —
+  // without this check the static HTML default (login screen) would show
+  // even though the user is now actually authenticated server-side.
+  const params = new URLSearchParams(window.location.search);
+
+  if (params.get('logout') === 'success') {
+    // Server session is gone — clear all client-side state so we don't
+    // try to restore a dashboard view that will just 401 on every API call.
+    ['eaz_screen','eaz_tab','eaz_brand','eaz_timeframe','eaz_granularity',
+     'eaz_custom_start','eaz_custom_end','eaz_mode','eaz_mi_tab'].forEach(k => localStorage.removeItem(k));
+    window.history.replaceState({}, '', window.location.pathname);
+    goTo('login');
+    return;
+  }
+
+  if (params.get('auth') === 'success') {
+    window.history.replaceState({}, '', window.location.pathname);
+    goTo('dash');
+    return;
+  }
 
   const savedScreen = localStorage.getItem('eaz_screen');
   if (savedScreen && savedScreen !== 'login') {
