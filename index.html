@@ -452,9 +452,9 @@ html{transition:background .2s,color .2s}
   <button class="chbtn" id="sd" onclick="setSCh('delivery')">Delivery</button>
   <button class="chbtn" id="sr" onclick="setSCh('retail')">Retail</button>
 </div>
-<div id="retailVarianceNotice" style="display:none;align-items:center;gap:7px;font-size:11px;color:var(--t2);background:var(--s2);border:1px solid var(--bdr);border-radius:8px;padding:7px 11px;margin-bottom:12px;width:fit-content" title="Retail figures may show a small variance (~2-5%) compared to Sweed's native reports, due to a known data quality issue in the Sweed Replica database. Delivery figures are unaffected. Figures remain directionally accurate for trend analysis.">
+<div id="retailVarianceNotice" style="display:none;align-items:center;gap:7px;font-size:11px;color:var(--t2);background:var(--s2);border:1px solid var(--bdr);border-radius:8px;padding:7px 11px;margin-bottom:12px;width:fit-content" title="Retail figures are directionally accurate but typically run ~2-4% below Sweed's native reports (known data quality issue on Sweed Replica data — delivery unaffected). For exact totals, reference Sweed directly.">
   <i class="ti ti-info-circle" style="color:var(--acc);font-size:14px;flex-shrink:0"></i>
-  <span>Retail figures may vary ~2&ndash;5% from Sweed's native reports (known data quality issue &mdash; delivery unaffected, directionally accurate for trends)</span>
+  <span>Retail figures are directionally accurate but typically run ~2&ndash;4% below Sweed's native reports (known data quality issue on Sweed Replica data &mdash; delivery unaffected). For exact totals, reference Sweed directly.</span>
 </div>
 <div class="krow" id="salesKpiRow">
   <div class="kc"><div class="kl">Gross Sales</div><div class="kv" id="kpi-gross">$218.4K</div><div class="kch up" id="kpi-gross-ch">&#8679; 12.3% vs prior</div></div>
